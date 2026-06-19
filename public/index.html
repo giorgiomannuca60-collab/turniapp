@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="theme-color" content="#0f1117">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>TurniApp</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
+  :root {
+    --bg:#0f1117; --surface:#1a1d27; --surface2:#22263a; --border:#2e3352;
+    --accent:#4f8ef7; --accent2:#7c5ff7; --green:#34d399; --orange:#fb923c;
+    --red:#f87171; --yellow:#fbbf24; --purple:#a78bfa; --swap:#f59e0b;
+    --text:#e8eaf0; --text2:#8b91b0; --text3:#5a607a;
+    --radius:14px; --radius-sm:8px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;}
+  #app{display:flex;flex-direction:column;height:100dvh;max-width:430px;margin:0 auto;overflow:hidden;}
+
+  .header{padding:14px 20px 10px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+  .header-name{font-size:18px;font-weight:700;}
+  .header-title{font-size:11px;font-weight:600;color:var(--text2);letter-spacing:.1em;text-transform:uppercase;}
+  .badge{background:var(--accent);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:20px;}
+
+  .tabs{display:flex;gap:4px;padding:8px 16px;flex-shrink:0;background:var(--bg);}
+  .tab{flex:1;padding:8px 4px;border-radius:var(--radius-sm);font-size:11px;font-weight:600;text-align:center;cursor:pointer;border:none;background:var(--surface);color:var(--text2);transition:all .2s;}
+  .tab.active{background:var(--accent);color:#fff;}
+
+  .content{flex:1;overflow-y:auto;padding:0 16px 100px;scrollbar-width:none;}
+  .content::-webkit-scrollbar{display:none;}
+
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px;}
+  .card-label{font-size:10px;font-weight:600;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;}
+
+  .row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);}
+  .row:last-child{border-bottom:none;}
+  .rl{font-size:13px;color:var(--text2);}
+  .rv{font-size:13px;font-weight:600;font-family:'DM Mono',monospace;}
+
+  .section-hdr{display:flex;justify-content:space-between;align-items:center;margin:16px 0 10px;}
+  .section-title{font-size:14px;font-weight:700;}
+  .section-link{font-size:12px;color:var(--accent);font-weight:600;cursor:pointer;}
+
+  /* SHIFT */
+  .shift-time{font-family:'DM Mono',monospace;font-size:30px;font-weight:500;color:var(--accent);}
+  .shift-badge{padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;}
+  .bm{background:#1e3a5f;color:#60a5fa;} .bp{background:#1a3a2a;color:#34d399;}
+  .bs{background:#2d1f4e;color:#a78bfa;} .bn{background:#1f1a3a;color:#c4b5fd;}
+  .br{background:#1f2a1f;color:#6b7280;}
+
+  /* WEEK STRIP */
+  .week-strip{display:flex;gap:5px;margin-top:8px;}
+  .dp{flex:1;text-align:center;padding:8px 3px;border-radius:var(--radius-sm);background:var(--surface2);cursor:pointer;border:2px solid transparent;transition:all .15s;}
+  .dp.today{border-color:var(--accent);}
+  .dp.has-swap{border-color:var(--swap);}
+  .dp-name{font-size:9px;font-weight:600;color:var(--text3);text-transform:uppercase;}
+  .dp-num{font-size:14px;font-weight:700;margin:2px 0;}
+  .dp-dots{display:flex;justify-content:center;gap:2px;margin-top:2px;}
+  .dot{width:5px;height:5px;border-radius:50%;}
+  .dot-m{background:#60a5fa;} .dot-p{background:#34d399;} .dot-s,.dot-n{background:#a78bfa;}
+  .dot-r{background:#374151;} .dot-swap{background:var(--swap);}
+
+  /* ALERT */
+  .alert{border-radius:var(--radius);padding:12px 16px;margin-bottom:12px;display:flex;align-items:flex-start;gap:10px;}
+  .alert-ok{background:#0d2a1c;border:1px solid #16593a;}
+  .alert-warn{background:#2d1f0a;border:1px solid #92400e;}
+  .alert-err{background:#2a0d0d;border:1px solid #991b1b;}
+  .alert-icon{font-size:18px;flex-shrink:0;}
+  .alert-title{font-size:13px;font-weight:700;}
+  .alert-desc{font-size:12px;color:var(--text2);margin-top:2px;line-height:1.4;}
+
+  /* CALENDAR */
+  .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;}
+  .cal-head{text-align:center;font-size:9px;font-weight:700;color:var(--text3);padding:4px 0;letter-spacing:.05em;}
+  .cal-cell{aspect-ratio:1;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;position:relative;background:var(--surface2);border:1.5px solid transparent;overflow:hidden;}
+  .cal-cell.empty{background:transparent;cursor:default;}
+  .cal-cell.today-cal{border-color:var(--accent);}
+  .cal-cell.swap-cal{border-color:var(--swap);}
+  .cal-cell.cm{background:#1a2d4a;} .cal-cell.cp{background:#1a3020;}
+  .cal-cell.cs,.cal-cell.cn{background:#241a3a;} .cal-cell.cr{background:var(--surface);}
+  .cal-cell.swap-cal.cm{background:linear-gradient(135deg,#1a2d4a 55%,#2d2000 55%);}
+  .cal-cell.swap-cal.cp{background:linear-gradient(135deg,#1a3020 55%,#2d2000 55%);}
+  .cal-cell.swap-cal.cs{background:linear-gradient(135deg,#241a3a 55%,#2d2000 55%);}
+  .cal-cell.swap-cal.cr{background:linear-gradient(135deg,#1a1d27 55%,#2d2000 55%);}
+  .cn-num{font-size:12px;font-weight:700;}
+  .cn-m{color:#60a5fa;} .cn-p{color:#34d399;} .cn-s,.cn-n{color:#a78bfa;} .cn-r{color:var(--text3);} .cn-swap{color:var(--swap);}
+  .cc{font-size:7px;font-weight:700;margin-top:1px;}
+  .swap-dot{position:absolute;bottom:2px;right:2px;width:6px;height:6px;border-radius:50%;background:var(--swap);}
+  .legend{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);}
+  .li{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text2);}
+  .ld{width:10px;height:10px;border-radius:3px;flex-shrink:0;}
+
+  /* DETAIL split */
+  .detail-split{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;}
+  .det-col{background:var(--surface2);border-radius:var(--radius-sm);padding:10px;}
+  .det-col.orig{border-top:2px solid #60a5fa;} .det-col.swp{border-top:2px solid var(--swap);}
+  .det-lbl{font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;}
+  .det-time{font-family:'DM Mono',monospace;font-size:14px;font-weight:600;}
+  .det-note{font-size:10px;color:var(--text3);margin-top:3px;}
+
+  /* SWAP */
+  .swap-item{background:var(--surface2);border-radius:var(--radius);padding:14px;margin-bottom:10px;border-left:3px solid var(--accent2);}
+  .swap-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
+  .swap-lbl{font-size:14px;font-weight:700;}
+  .swap-status{font-size:10px;font-weight:700;padding:3px 8px;border-radius:20px;}
+  .sp{background:#2d2a0a;color:#fbbf24;} .so{background:#0d2a1c;color:#34d399;} .sd{background:#2a0d0d;color:#f87171;}
+  .swap-details{font-size:12px;color:var(--text2);line-height:1.7;}
+  .swap-notes{font-size:11px;color:var(--text3);margin-top:6px;background:var(--bg);padding:8px;border-radius:6px;}
+  .swap-arrow{color:var(--swap);font-weight:700;margin:0 3px;}
+  .swap-del{float:right;background:none;border:none;color:var(--text3);font-size:16px;cursor:pointer;padding:0;}
+
+  /* FORM */
+  .form-group{margin-bottom:12px;}
+  .form-label{font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px;display:block;}
+  .form-input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;color:var(--text);font-size:14px;font-family:'Inter',sans-serif;outline:none;}
+  .form-input:focus{border-color:var(--accent);}
+  select.form-input option{background:var(--surface2);}
+  .form-textarea{resize:none;min-height:68px;}
+  .form-row{display:flex;gap:8px;}
+  .form-row .form-group{flex:1;}
+  .btn{width:100%;padding:11px;border-radius:var(--radius);border:none;font-size:14px;font-weight:700;cursor:pointer;transition:all .2s;margin-bottom:8px;}
+  .btn-primary{background:var(--accent);color:#fff;}
+  .btn-secondary{background:var(--surface2);color:var(--text2);border:1px solid var(--border);}
+  .btn-purple{background:var(--accent2);color:#fff;}
+  .btn:active{opacity:.8;transform:scale(.98);}
+  .btn:last-child{margin-bottom:0;}
+
+  /* EMAIL */
+  .email-item{background:var(--surface2);border-radius:var(--radius);padding:14px;margin-bottom:10px;border-left:3px solid var(--accent);}
+  .email-item.done{border-left-color:var(--green);opacity:.75;}
+  .email-item.err{border-left-color:var(--red);}
+  .ef{font-size:11px;color:var(--text3);}
+  .es{font-size:14px;font-weight:600;margin:2px 0;}
+  .ep{font-size:12px;color:var(--text2);}
+  .et{font-size:10px;color:var(--text3);float:right;}
+
+  /* UPLOAD */
+  .upload-area{border:2px dashed var(--border);border-radius:var(--radius);padding:20px;text-align:center;cursor:pointer;transition:border-color .2s;margin-bottom:10px;position:relative;}
+  .upload-area:hover{border-color:var(--accent);}
+  .upload-area input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;}
+  .ui{font-size:28px;margin-bottom:6px;}
+  .ut{font-size:14px;font-weight:600;color:var(--text2);}
+  .us{font-size:11px;color:var(--text3);margin-top:4px;}
+
+  /* NOTIF */
+  .notif-row{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--border);}
+  .notif-row:last-child{border-bottom:none;}
+  .toggle{width:44px;height:24px;border-radius:12px;background:var(--surface2);border:1px solid var(--border);position:relative;cursor:pointer;transition:background .2s;flex-shrink:0;}
+  .toggle.on{background:var(--accent);border-color:var(--accent);}
+  .toggle::after{content:'';position:absolute;width:18px;height:18px;border-radius:50%;background:#fff;top:2px;left:2px;transition:transform .2s;}
+  .toggle.on::after{transform:translateX(20px);}
+
+  /* PAY */
+  .pay-big{text-align:center;padding:16px 0;}
+  .pay-amount{font-family:'DM Mono',monospace;font-size:40px;font-weight:500;color:var(--green);}
+  .pay-label{font-size:12px;color:var(--text2);margin-top:4px;}
+
+  .tag{display:inline-block;padding:3px 8px;border-radius:20px;font-size:10px;font-weight:700;margin:2px;}
+  .tag-blue{background:#1e3a5f;color:#60a5fa;}
+  .tag-orange{background:#2d1f0a;color:#fb923c;}
+  .tag-swap{background:#2d2000;color:var(--swap);}
+
+  .ai-badge{display:inline-flex;align-items:center;gap:4px;background:linear-gradient(90deg,#4f8ef7,#7c5ff7);padding:3px 10px;border-radius:20px;font-size:10px;font-weight:700;color:#fff;margin-left:8px;}
+
+  .sug-item{background:var(--surface2);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;}
+  .sug-top{display:flex;justify-content:space-between;align-items:center;}
+  .sug-name{font-size:13px;font-weight:600;}
+  .sug-match{font-size:11px;color:var(--green);font-weight:700;}
+  .sug-detail{font-size:12px;color:var(--text2);margin-top:4px;}
+
+  .divider{border:none;border-top:1px solid var(--border);margin:16px 0;}
+  .hidden{display:none!important;}
+
+  /* TOAST */
+  .toast{position:fixed;bottom:110px;left:50%;transform:translateX(-50%);padding:10px 20px;border-radius:30px;font-size:13px;font-weight:700;color:#fff;z-index:500;transition:opacity .4s;}
+  .toast-ok{background:var(--accent2);}
+  .toast-err{background:var(--red);}
+
+  /* SPINNER */
+  .spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div class="header">
+    <div>
+      <div class="header-title">Turni di lavoro</div>
+      <div class="header-name" id="hdrName">Giorgio Mannuca</div>
+    </div>
+    <div class="badge" id="hdrGruppo">GR. P.T. 11</div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('oggi')">Oggi</button>
+    <button class="tab" onclick="showTab('calendario')">Calendario</button>
+    <button class="tab" onclick="showTab('cambi')">Cambi</button>
+    <button class="tab" onclick="showTab('email')">Email</button>
+    <button class="tab" onclick="showTab('impostazioni')">⚙️</button>
+  </div>
+
+  <div class="content">
+
+    <!-- ===== OGGI ===== -->
+    <div id="tab-oggi">
+      <div class="card" id="todayCard">
+        <div class="card-label" id="todayLabel">Caricamento...</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin:10px 0;">
+          <div>
+            <div class="shift-time" id="todayTime">––:–– – ––:––</div>
+            <div style="font-size:13px;color:var(--text2);margin-top:2px;" id="todayNote"></div>
+          </div>
+          <div class="shift-badge" id="todayBadge">–</div>
+        </div>
+        <div id="todayTags"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-label">Settimana corrente</div>
+        <div class="week-strip" id="weekStrip"></div>
+        <div id="weekDayInfo" style="margin-top:10px;font-size:13px;color:var(--text2);min-height:20px;"></div>
+      </div>
+
+      <div id="discrepanzaAlert" class="alert alert-ok">
+        <div class="alert-icon">✅</div>
+        <div>
+          <div class="alert-title">Nessuna discrepanza</div>
+          <div class="alert-desc">I turni corrispondono al piano settimanale.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-label">Questa settimana</div>
+        <div class="row"><span class="rl">Ore totali</span><span class="rv" id="statOre">25h / 25h</span></div>
+        <div class="row"><span class="rl">Giorni lavorati</span><span class="rv" id="statGiorni">5 / 5</span></div>
+        <div class="row"><span class="rl">Cambi attivi</span><span class="rv" id="statCambi" style="color:var(--swap)">–</span></div>
+        <div class="row"><span class="rl">Stima paga netta</span><span class="rv" id="statPaga" style="color:var(--green)">€ –</span></div>
+      </div>
+    </div>
+
+    <!-- ===== CALENDARIO ===== -->
+    <div id="tab-calendario" class="hidden">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+          <button onclick="prevMonth()" style="background:var(--surface2);border:none;color:var(--text);padding:6px 12px;border-radius:8px;font-size:16px;cursor:pointer;">‹</button>
+          <div style="font-size:16px;font-weight:700;" id="calMonthLabel"></div>
+          <button onclick="nextMonth()" style="background:var(--surface2);border:none;color:var(--text);padding:6px 12px;border-radius:8px;font-size:16px;cursor:pointer;">›</button>
+        </div>
+        <div class="cal-grid" id="calGrid"></div>
+        <div class="legend">
+          <div class="li"><div class="ld" style="background:#1a2d4a;border:1px solid #60a5fa;"></div>Mattino</div>
+          <div class="li"><div class="ld" style="background:#1a3020;border:1px solid #34d399;"></div>Pomeriggio</div>
+          <div class="li"><div class="ld" style="background:#241a3a;border:1px solid #a78bfa;"></div>Sera/Notte</div>
+          <div class="li"><div class="ld" style="background:var(--surface);border:1px solid var(--border);"></div>Riposo</div>
+          <div class="li"><div class="ld" style="background:#2d2000;border:1.5px solid var(--swap);"></div>Cambio</div>
+        </div>
+      </div>
+      <div id="calDayDetail"></div>
+    </div>
+
+    <!-- ===== CAMBI ===== -->
+    <div id="tab-cambi" class="hidden">
+
+      <div class="card" style="margin-top:4px;">
+        <div class="card-label">Registra cambio turno</div>
+        <div style="font-size:12px;color:var(--text2);margin:4px 0 14px;">Il cambio sarà visibile nel calendario con doppio indicatore.</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Data ceduta</label>
+            <input type="date" class="form-input" id="sw_mydate">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Orario ceduto</label>
+            <input type="text" class="form-input" id="sw_mytime" placeholder="es. 13:00–18:00">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Collega</label>
+          <input type="text" class="form-input" id="sw_colleague" placeholder="Nome e cognome">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Data ricevuta</label>
+            <input type="date" class="form-input" id="sw_theirdate">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Orario ricevuto</label>
+            <input type="text" class="form-input" id="sw_theirtime" placeholder="es. 07:00–13:00">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Stato</label>
+          <select class="form-input" id="sw_status">
+            <option value="pending">⏳ In attesa</option>
+            <option value="ok">✅ Approvato</option>
+            <option value="denied">❌ Rifiutato</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Note</label>
+          <textarea class="form-input form-textarea" id="sw_notes" placeholder="Motivo, accordi..."></textarea>
+        </div>
+        <button class="btn btn-purple" onclick="saveSwap()">💾 Salva cambio</button>
+      </div>
+
+      <div class="section-hdr">
+        <div class="section-title">Cambi registrati</div>
+        <div id="swapCountLabel" style="font-size:12px;color:var(--text3);"></div>
+      </div>
+      <div id="swapList"><div style="text-align:center;color:var(--text3);padding:20px;">Caricamento...</div></div>
+
+      <hr class="divider">
+
+      <div class="section-hdr" style="margin-top:4px;">
+        <div class="section-title">Suggerimenti <span class="ai-badge">✦ AI</span></div>
+      </div>
+      <div class="card">
+        <div class="card-label">Vuoi il 25 Luglio libero?</div>
+        <div class="sug-item">
+          <div class="sug-top"><div class="sug-name">Marco Bianchi (Gr.12)</div><div class="sug-match">↔ Compatibile</div></div>
+          <div class="sug-detail">Lui: 13/18 ven 25 · Tu: 07/13 ven 1 ago → scambio 5h↔5h</div>
+        </div>
+        <div class="sug-item">
+          <div class="sug-top"><div class="sug-name">Laura Rossi (Gr.10)</div><div class="sug-match">↔ Quasi compatibile</div></div>
+          <div class="sug-detail">Lei: 14/19 gio 24 · Cambio doppio con recupero sabato</div>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:8px;">💡 Basati sulla griglia di rotazione. Verifica col responsabile.</div>
+      </div>
+    </div>
+
+    <!-- ===== EMAIL ===== -->
+    <div id="tab-email" class="hidden">
+
+      <div class="card" style="margin-top:4px;background:linear-gradient(135deg,#1e3a5f,#1a2040);border-color:#2e4a7a;text-align:center;">
+        <div style="font-size:32px;margin-bottom:8px;">📧</div>
+        <div style="font-size:16px;font-weight:700;margin-bottom:6px;">Connetti la tua email</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:14px;line-height:1.5;">L'app leggerà automaticamente settimanale e giornaliero ogni giorno.</div>
+        <button class="btn btn-primary" onclick="connectEmail('gmail')">📥 Connetti Gmail</button>
+        <button class="btn btn-secondary" onclick="connectEmail('outlook')">📥 Connetti Outlook</button>
+      </div>
+
+      <div class="card">
+        <div class="card-label">Carica file manualmente</div>
+        <div class="upload-area">
+          <input type="file" accept=".pdf,.xlsx,.xls" onchange="uploadFile(this,'settimanale')">
+          <div class="ui">📊</div>
+          <div class="ut">Piano settimanale (PDF / Excel)</div>
+          <div class="us">Tocca per selezionare</div>
+        </div>
+        <div class="upload-area">
+          <input type="file" accept=".pdf" onchange="uploadFile(this,'giornaliero')">
+          <div class="ui">📋</div>
+          <div class="ut">Ordine di servizio giornaliero (PDF)</div>
+          <div class="us">Tocca per selezionare</div>
+        </div>
+      </div>
+
+      <div class="section-hdr">
+        <div class="section-title">Storico elaborazioni <span class="ai-badge">✦ AI</span></div>
+        <div class="section-link" onclick="loadEmailLog()">↻ Aggiorna</div>
+      </div>
+      <div id="emailLog"><div style="text-align:center;color:var(--text3);padding:20px;">Caricamento...</div></div>
+    </div>
+
+    <!-- ===== IMPOSTAZIONI ===== -->
+    <div id="tab-impostazioni" class="hidden">
+      <div class="card" style="margin-top:4px;">
+        <div class="card-label">Profilo</div>
+        <div class="row"><span class="rl">Nome</span><span class="rv">Giorgio Mannuca</span></div>
+        <div class="row"><span class="rl">Gruppo</span><span class="rv">P.T. 11</span></div>
+        <div class="row"><span class="rl">Ore settimanali</span><span class="rv">25h</span></div>
+        <div class="row"><span class="rl">Contratto</span><span class="rv">Part-time</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-label">Paga oraria</div>
+        <div style="display:flex;align-items:center;gap:12px;padding:8px 0;">
+          <input type="range" id="paySlider" min="8" max="22" value="12" step="0.5" style="flex:1;accent-color:var(--accent);" oninput="updatePay()">
+          <span id="payVal" style="font-family:'DM Mono',monospace;font-size:16px;font-weight:700;color:var(--green);min-width:52px;">€12.0</span>
+        </div>
+        <div style="font-size:11px;color:var(--text3);">Stima mensile: <span id="monthPay" style="color:var(--green);font-weight:700;">€ 1.300</span> · +25% notte · +50% festivi</div>
+      </div>
+
+      <div class="card">
+        <div class="card-label">Notifiche</div>
+        <div class="notif-row">
+          <div><div style="font-size:13px;font-weight:600;">Turno del giorno</div><div style="font-size:11px;color:var(--text3);">Ogni mattina ore 07:00</div></div>
+          <div class="toggle on" id="tog1" onclick="toggleSetting('tog1','notif_mattina')"></div>
+        </div>
+        <div class="notif-row">
+          <div><div style="font-size:13px;font-weight:600;">Nuova email turni</div><div style="font-size:11px;color:var(--text3);">Quando arriva settimanale/giornaliero</div></div>
+          <div class="toggle on" id="tog2" onclick="toggleSetting('tog2','notif_email')"></div>
+        </div>
+        <div class="notif-row">
+          <div><div style="font-size:13px;font-weight:600;">Promemoria 30 min prima</div><div style="font-size:11px;color:var(--text3);">Prima dell'inizio turno</div></div>
+          <div class="toggle" id="tog3" onclick="toggleSetting('tog3','notif_promemoria')"></div>
+        </div>
+        <div class="notif-row">
+          <div><div style="font-size:13px;font-weight:600;">Discrepanze rilevate</div><div style="font-size:11px;color:var(--text3);">Allarme immediato</div></div>
+          <div class="toggle on" id="tog4" onclick="toggleSetting('tog4','notif_discrepanze')"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-label">Stima stipendio mensile</div>
+        <div class="pay-big">
+          <div class="pay-amount" id="bigPay">€ 1.300</div>
+          <div class="pay-label">25h/sett × 4 settimane</div>
+        </div>
+        <div class="row"><span class="rl">Ore normali</span><span class="rv">87h → €1.044</span></div>
+        <div class="row"><span class="rl">Notturne (+25%)</span><span class="rv">13h → €195</span></div>
+        <div class="row"><span class="rl">Festivi (+50%)</span><span class="rv">5h → €90</span></div>
+      </div>
+    </div>
+
+  </div><!-- end content -->
+</div>
+
+<script>
+// ===== CONFIG =====
+const API = ''; // vuoto = stessa origine del server; in dev: 'http://localhost:3000'
+
+const TYPE_LABEL = { m:'Mattino', p:'Pomeriggio', s:'Sera', n:'Notte', r:'Riposo' };
+const TYPE_COLOR = { m:'#60a5fa', p:'#34d399', s:'#a78bfa', n:'#c4b5fd', r:'#4b5563' };
+const MONTHS = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+const MONTHS_S = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
+const DAYS_S = ['Dom','Lun','Mar','Mer','Gio','Ven','Sab'];
+
+let allTurni = []; // turni dal server
+let allCambi = []; // cambi dal server
+let calYear = new Date().getFullYear();
+let calMonth = new Date().getMonth();
+
+// ===== API HELPERS =====
+async function apiFetch(path, opts = {}) {
+  try {
+    const r = await fetch(API + path, {
+      headers: { 'Content-Type': 'application/json', ...opts.headers },
+      ...opts
+    });
+    return await r.json();
+  } catch(e) {
+    console.error('API error', path, e);
+    return null;
+  }
+}
+
+// ===== INIT =====
+async function init() {
+  await loadTurni();
+  await loadCambi();
+  buildToday();
+  buildWeekStrip();
+  loadEmailLog();
+}
+
+// ===== TURNI =====
+async function loadTurni() {
+  const data = await apiFetch('/api/turni');
+  allTurni = data || [];
+}
+
+function getTurno(dateStr) {
+  return allTurni.find(t => t.data === dateStr) || null;
+}
+
+// ===== CAMBI =====
+async function loadCambi() {
+  const data = await apiFetch('/api/cambi');
+  allCambi = data || [];
+  renderSwapList();
+  updateSwapCount();
+}
+
+function getSwap(dateStr) {
+  return allCambi.find(c => c.data_ceduta === dateStr) || null;
+}
+
+// ===== TODAY =====
+function buildToday() {
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0,10);
+  const turno = getTurno(dateStr);
+  const swap = getSwap(dateStr);
+
+  const dayNames = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
+  document.getElementById('todayLabel').textContent =
+    dayNames[now.getDay()] + ' ' + now.getDate() + ' ' + MONTHS[now.getMonth()] + ' ' + now.getFullYear();
+
+  if (turno) {
+    document.getElementById('todayTime').textContent = turno.orario;
+    const t = turno.tipo;
+    const badgeClass = {m:'bm',p:'bp',s:'bs',n:'bn',r:'br'}[t] || 'br';
+    const badge = document.getElementById('todayBadge');
+    badge.textContent = TYPE_LABEL[t] || '–';
+    badge.className = 'shift-badge ' + badgeClass;
+    document.getElementById('todayNote').textContent = turno.note || '';
+    document.getElementById('todayTags').innerHTML =
+      (t === 's' || t === 'n') ? '<span class="tag tag-orange">Maggiorazione notturna</span>' : '';
+    if (swap) {
+      document.getElementById('todayTags').innerHTML +=
+        `<span class="tag tag-swap">⇄ Cambio con ${swap.collega}</span>`;
+    }
+  } else {
+    document.getElementById('todayTime').textContent = 'Nessun turno';
+    document.getElementById('todayBadge').textContent = '–';
+  }
+
+  // Stats
+  const thisMon = getWeekStart(now);
+  const weekTurni = allTurni.filter(t => {
+    const d = new Date(t.data); return d >= thisMon && d < new Date(thisMon.getTime() + 7*86400000);
+  });
+  const lavorati = weekTurni.filter(t => t.tipo !== 'r').length;
+  document.getElementById('statOre').textContent = (lavorati * 5) + 'h / 25h';
+  document.getElementById('statGiorni').textContent = lavorati + ' / 5';
+  const cambiSettimana = allCambi.filter(c => {
+    const d = new Date(c.data_ceduta); return d >= thisMon && d < new Date(thisMon.getTime() + 7*86400000);
+  });
+  document.getElementById('statCambi').textContent = cambiSettimana.length + ' cambio/i';
+  const paga = parseFloat(document.getElementById('paySlider')?.value || 12);
+  document.getElementById('statPaga').textContent = '€ ' + Math.round(paga * 25 * 0.85 * 4 / 4.33);
+}
+
+function getWeekStart(d) {
+  const day = d.getDay();
+  const diff = (day === 0) ? -6 : 1 - day;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + diff);
+}
+
+// ===== WEEK STRIP =====
+function buildWeekStrip() {
+  const now = new Date();
+  const monday = getWeekStart(now);
+  const strip = document.getElementById('weekStrip');
+  strip.innerHTML = '';
+  const dayNames = ['Lu','Ma','Me','Gi','Ve','Sa','Do'];
+
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday.getTime() + i * 86400000);
+    const dateStr = d.toISOString().slice(0,10);
+    const turno = getTurno(dateStr);
+    const swap = getSwap(dateStr);
+    const isToday = d.toDateString() === now.toDateString();
+    const t = turno ? turno.tipo : '';
+
+    const pill = document.createElement('div');
+    pill.className = 'dp' + (isToday ? ' today' : '') + (swap ? ' has-swap' : '');
+    let dots = `<div class="dp-dots"><div class="dot dot-${t || 'r'}"></div>`;
+    if (swap) dots += `<div class="dot dot-swap"></div>`;
+    dots += '</div>';
+    pill.innerHTML = `<div class="dp-name">${dayNames[i]}</div><div class="dp-num">${d.getDate()}</div>${dots}`;
+    pill.onclick = () => showWeekDay(d, turno, swap);
+    strip.appendChild(pill);
+  }
+}
+
+function showWeekDay(d, turno, swap) {
+  const t = turno ? turno.tipo : 'r';
+  let html = `<b style="color:var(--text)">${DAYS_S[d.getDay()]} ${d.getDate()} ${MONTHS_S[d.getMonth()]}</b>
+    &nbsp;·&nbsp; <span style="color:${TYPE_COLOR[t]}">${TYPE_LABEL[t]}</span>
+    &nbsp;·&nbsp; <span style="font-family:'DM Mono',monospace">${turno ? turno.orario : 'Riposo'}</span>`;
+  if (swap) html += ` &nbsp;<span class="tag tag-swap">⇄ ${swap.collega}</span>`;
+  document.getElementById('weekDayInfo').innerHTML = html;
+}
+
+// ===== CALENDAR =====
+async function buildCal() {
+  document.getElementById('calMonthLabel').textContent = MONTHS[calMonth] + ' ' + calYear;
+  const meseStr = `${calYear}-${String(calMonth+1).padStart(2,'0')}`;
+  const turniMese = await apiFetch(`/api/turni?mese=${meseStr}`) || [];
+  const turniMap = {};
+  turniMese.forEach(t => turniMap[t.data] = t);
+
+  const grid = document.getElementById('calGrid');
+  grid.innerHTML = '';
+  ['Lu','Ma','Me','Gi','Ve','Sa','Do'].forEach(h => {
+    const hd = document.createElement('div'); hd.className = 'cal-head'; hd.textContent = h; grid.appendChild(hd);
+  });
+
+  const firstDay = new Date(calYear, calMonth, 1).getDay();
+  const offset = (firstDay === 0) ? 6 : firstDay - 1;
+  const daysInMonth = new Date(calYear, calMonth+1, 0).getDate();
+  const now = new Date();
+
+  for (let i = 0; i < offset; i++) {
+    const e = document.createElement('div'); e.className = 'cal-cell empty'; grid.appendChild(e);
+  }
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const turno = turniMap[dateStr] || null;
+    const swap = getSwap(dateStr);
+    const t = turno ? turno.tipo : '';
+    const isToday = (day === now.getDate() && calMonth === now.getMonth() && calYear === now.getFullYear());
+
+    const cell = document.createElement('div');
+    let cls = 'cal-cell';
+    if (t) cls += ' c' + t;
+    if (isToday) cls += ' today-cal';
+    if (swap) cls += ' swap-cal';
+    cell.className = cls;
+
+    const numCls = swap ? 'cn-swap' : ('cn-' + (t || 'r'));
+    cell.innerHTML = `<div class="cn-num ${numCls}">${day}</div>`;
+    if (t && t !== 'r') cell.innerHTML += `<div class="cc" style="color:${TYPE_COLOR[t]}">${t.toUpperCase()}</div>`;
+    if (swap) cell.innerHTML += `<div class="swap-dot"></div>`;
+
+    cell.onclick = () => showCalDetail(day, turno, swap);
+    grid.appendChild(cell);
+  }
+}
+
+function showCalDetail(day, turno, swap) {
+  const el = document.getElementById('calDayDetail');
+  if (!turno && !swap) { el.innerHTML = ''; return; }
+  const t = turno ? turno.tipo : 'r';
+  const dateLabel = `${day} ${MONTHS_S[calMonth]} ${calYear}`;
+
+  if (swap) {
+    const statusMap = {ok:'✅ APPROVATO', pending:'⏳ IN ATTESA', denied:'❌ RIFIUTATO'};
+    const statusCls = {ok:'so', pending:'sp', denied:'sd'};
+    el.innerHTML = `
+      <div class="card">
+        <div class="card-label">${dateLabel} · <span style="color:var(--swap)">⇄ Cambio con ${swap.collega}</span></div>
+        <div class="detail-split">
+          <div class="det-col orig">
+            <div class="det-lbl">Piano originale</div>
+            <div class="det-time" style="color:${TYPE_COLOR[t]}">${turno ? turno.orario : '–'}</div>
+            <div class="det-note">${TYPE_LABEL[t]}</div>
+          </div>
+          <div class="det-col swp">
+            <div class="det-lbl">Dopo il cambio</div>
+            <div class="det-time" style="color:var(--swap)">${swap.orario_ceduto}</div>
+            <div class="det-note">Ceduto a ${swap.collega}</div>
+          </div>
+        </div>
+        ${swap.orario_ricevuto ? `<div style="margin-top:8px;font-size:11px;color:var(--text3);">Ricevi: ${swap.orario_ricevuto} (${swap.data_ricevuta})</div>` : ''}
+        ${swap.note ? `<div style="margin-top:4px;font-size:11px;color:var(--text3);">📝 ${swap.note}</div>` : ''}
+        <div style="margin-top:8px;"><span class="swap-status ${statusCls[swap.stato]||'sp'}" style="display:inline-block;">${statusMap[swap.stato]||'IN ATTESA'}</span></div>
+      </div>`;
+  } else {
+    el.innerHTML = `
+      <div class="card">
+        <div class="card-label">${dateLabel}</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+          <div>
+            <div style="font-family:'DM Mono',monospace;font-size:20px;color:${TYPE_COLOR[t]};">${turno.orario}</div>
+            <div style="font-size:13px;color:var(--text2);margin-top:2px;">${TYPE_LABEL[t]}</div>
+            ${turno.note ? `<div style="font-size:11px;color:var(--text3);margin-top:2px;">📝 ${turno.note}</div>` : ''}
+          </div>
+          <div style="font-size:11px;color:var(--text3);">Gr. P.T. 11</div>
+        </div>
+      </div>`;
+  }
+}
+
+function prevMonth() { calMonth--; if(calMonth<0){calMonth=11;calYear--;} buildCal(); document.getElementById('calDayDetail').innerHTML=''; }
+function nextMonth() { calMonth++; if(calMonth>11){calMonth=0;calYear++;} buildCal(); document.getElementById('calDayDetail').innerHTML=''; }
+
+// ===== SAVE SWAP =====
+async function saveSwap() {
+  const body = {
+    data_ceduta: document.getElementById('sw_mydate').value,
+    orario_ceduto: document.getElementById('sw_mytime').value,
+    collega: document.getElementById('sw_colleague').value,
+    data_ricevuta: document.getElementById('sw_theirdate').value,
+    orario_ricevuto: document.getElementById('sw_theirtime').value,
+    stato: document.getElementById('sw_status').value,
+    note: document.getElementById('sw_notes').value,
+  };
+  if (!body.data_ceduta || !body.orario_ceduto || !body.collega) {
+    toast('Compila data, orario ceduto e collega', true); return;
+  }
+  const res = await apiFetch('/api/cambi', { method:'POST', body: JSON.stringify(body) });
+  if (res && res.ok) {
+    ['sw_mydate','sw_mytime','sw_colleague','sw_theirdate','sw_theirtime','sw_notes'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('sw_status').value = 'pending';
+    await loadCambi();
+    buildWeekStrip();
+    toast('✅ Cambio salvato! Visibile nel calendario.');
+  } else {
+    toast('Errore salvataggio', true);
+  }
+}
+
+function renderSwapList() {
+  const el = document.getElementById('swapList');
+  if (!allCambi.length) { el.innerHTML = '<div style="text-align:center;color:var(--text3);padding:20px;">Nessun cambio registrato</div>'; return; }
+
+  const statusMap = {ok:'APPROVATO', pending:'IN ATTESA', denied:'RIFIUTATO'};
+  const statusCls = {ok:'so', pending:'sp', denied:'sd'};
+  const borderColor = {ok:'var(--green)', pending:'var(--yellow)', denied:'var(--red)'};
+
+  el.innerHTML = allCambi.map(c => {
+    const d = new Date(c.data_ceduta + 'T00:00:00');
+    const label = `${DAYS_S[d.getDay()]} ${d.getDate()} ${MONTHS_S[d.getMonth()]}`;
+    return `
+      <div class="swap-item" style="border-left-color:${borderColor[c.stato]||'var(--yellow)'};">
+        <div class="swap-hdr">
+          <div class="swap-lbl">📅 ${label}</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div class="swap-status ${statusCls[c.stato]||'sp'}">${statusMap[c.stato]||'IN ATTESA'}</div>
+            <button class="swap-del" onclick="deleteSwap(${c.id})">🗑</button>
+          </div>
+        </div>
+        <div class="swap-details">
+          <b>Cedo:</b> ${c.orario_ceduto} <span class="swap-arrow">⇄</span> <b>${c.collega}</b>
+          ${c.data_ricevuta ? `<br><b>Ricevo:</b> ${c.data_ricevuta} · ${c.orario_ricevuto}` : ''}
+        </div>
+        ${c.note ? `<div class="swap-notes">📝 ${c.note}</div>` : ''}
+      </div>`;
+  }).join('');
+}
+
+async function deleteSwap(id) {
+  if (!confirm('Eliminare questo cambio?')) return;
+  await apiFetch('/api/cambi/' + id, { method:'DELETE' });
+  await loadCambi();
+  buildWeekStrip();
+  toast('Cambio eliminato');
+}
+
+function updateSwapCount() {
+  document.getElementById('swapCountLabel').textContent = allCambi.length + ' totali';
+}
+
+// ===== EMAIL LOG =====
+async function loadEmailLog() {
+  const logs = await apiFetch('/api/email-log') || [];
+  const el = document.getElementById('emailLog');
+  if (!logs.length) { el.innerHTML = '<div style="text-align:center;color:var(--text3);padding:20px;">Nessuna elaborazione ancora</div>'; return; }
+  el.innerHTML = logs.map(l => {
+    const d = new Date(l.created_at);
+    const time = d.toLocaleDateString('it-IT') + ' ' + d.toLocaleTimeString('it-IT', {hour:'2-digit',minute:'2-digit'});
+    const isErr = l.discrepanza;
+    return `
+      <div class="email-item ${isErr ? 'err' : 'done'}">
+        <span class="et">${time}</span>
+        <div class="ef">${l.tipo === 'settimanale' ? '📊 Settimanale' : '📋 Giornaliero'}</div>
+        <div class="es">${isErr ? '⚠️' : '✅'} ${l.filename || 'importazione'}</div>
+        <div class="ep">${l.contenuto_estratto || ''}</div>
+        ${l.discrepanza_note ? `<div class="ep" style="color:var(--red);margin-top:4px;">⚠️ ${l.discrepanza_note}</div>` : ''}
+      </div>`;
+  }).join('');
+}
+
+// ===== UPLOAD FILE =====
+async function uploadFile(input, tipo) {
+  if (!input.files.length) return;
+  const file = input.files[0];
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('tipo', tipo);
+  toast(`<span class="spinner"></span> Elaborazione ${file.name}...`);
+  try {
+    const r = await fetch(API + '/api/upload', { method:'POST', body: fd });
+    const data = await r.json();
+    if (data.ok) {
+      toast(`✅ ${data.messaggio}`);
+      loadEmailLog();
+    } else {
+      toast('Errore: ' + (data.error || 'sconosciuto'), true);
+    }
+  } catch(e) {
+    toast('Errore di connessione', true);
+  }
+  input.value = '';
+}
+
+// ===== SETTINGS =====
+function updatePay() {
+  const v = parseFloat(document.getElementById('paySlider').value);
+  document.getElementById('payVal').textContent = '€' + v.toFixed(1);
+  const m = Math.round(v * 25 * 4 * 0.85);
+  document.getElementById('monthPay').textContent = '€ ' + m.toLocaleString('it-IT');
+  document.getElementById('bigPay').textContent = '€ ' + m.toLocaleString('it-IT');
+  if (document.getElementById('statPaga')) document.getElementById('statPaga').textContent = '€ ' + Math.round(m/4.33);
+}
+
+async function toggleSetting(togId, key) {
+  const el = document.getElementById(togId);
+  el.classList.toggle('on');
+  const val = el.classList.contains('on') ? '1' : '0';
+  await apiFetch(`/api/impostazioni/${key}`, { method:'PUT', body: JSON.stringify({valore: val}) });
+}
+
+// ===== TABS =====
+function showTab(name) {
+  ['oggi','calendario','cambi','email','impostazioni'].forEach(t => {
+    document.getElementById('tab-'+t).classList.toggle('hidden', t !== name);
+  });
+  document.querySelectorAll('.tab').forEach((el,i) => {
+    el.classList.toggle('active', ['oggi','calendario','cambi','email','impostazioni'][i] === name);
+  });
+  if (name === 'calendario') { buildCal(); document.getElementById('calDayDetail').innerHTML = ''; }
+}
+
+// ===== EMAIL CONNECT =====
+function connectEmail(type) {
+  alert(`🔗 ${type === 'gmail' ? 'Gmail (Google OAuth)' : 'Outlook (Microsoft OAuth)'}\n\nQuesta funzione aprirà il flusso di autorizzazione. Una volta connessa, l'app leggerà le email ogni giorno, estrarrà i turni e aggiornerà il calendario automaticamente.\n\n(Da implementare con le credenziali OAuth nella sezione .env)`);
+}
+
+// ===== TOAST =====
+function toast(msg, isErr = false) {
+  const old = document.querySelector('.toast');
+  if (old) old.remove();
+  const t = document.createElement('div');
+  t.className = 'toast ' + (isErr ? 'toast-err' : 'toast-ok');
+  t.innerHTML = msg;
+  document.body.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 400); }, 2800);
+}
+
+// ===== START =====
+init();
+</script>
+</body>
+</html>
