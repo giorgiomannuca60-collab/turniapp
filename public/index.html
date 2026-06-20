@@ -275,12 +275,16 @@
           </div>
           <div class="form-group">
             <label class="form-label">Orario ceduto</label>
-            <input type="text" class="form-input" id="sw_mytime" placeholder="es. 13:00–18:00">
+            <input type="text" class="form-input" id="sw_mytime" placeholder="es. 13:00–18:00" oninput="checkRiposo11h()">
           </div>
         </div>
-        <div class="form-group">
+        <div class="form-group" style="position:relative;">
           <label class="form-label">Collega</label>
-          <input type="text" class="form-input" id="sw_colleague" placeholder="Nome e cognome">
+          <input type="text" class="form-input" id="sw_colleague" placeholder="Scrivi il nome..." autocomplete="off" oninput="cercaColleghi(this.value)" onfocus="cercaColleghi(this.value)">
+          <div id="colleagueSuggestions" style="position:absolute;top:100%;left:0;right:0;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);margin-top:4px;max-height:200px;overflow-y:auto;z-index:20;display:none;"></div>
+          <div id="colleagueGroupBadge" style="margin-top:6px;display:none;">
+            <span class="tag tag-blue" id="colleagueGroupText">Gruppo –</span>
+          </div>
         </div>
         <div class="form-row">
           <div class="form-group">
@@ -304,6 +308,15 @@
           <label class="form-label">Note</label>
           <textarea class="form-input form-textarea" id="sw_notes" placeholder="Motivo, accordi..."></textarea>
         </div>
+
+        <div id="riposo11hWarning" class="alert alert-warn" style="display:none;margin-bottom:12px;">
+          <div class="alert-icon">⚠️</div>
+          <div>
+            <div class="alert-title">Attenzione: riposo inferiore a 11h</div>
+            <div class="alert-desc" id="riposo11hDetail"></div>
+          </div>
+        </div>
+
         <button class="btn btn-purple" onclick="saveSwap()">💾 Salva cambio</button>
       </div>
 
@@ -316,20 +329,10 @@
       <hr class="divider">
 
       <div class="section-hdr" style="margin-top:4px;">
-        <div class="section-title">Suggerimenti <span class="ai-badge">✦ AI</span></div>
+        <div class="section-title">Organizzati per il mare <span class="ai-badge">✦ AI</span></div>
+        <div class="section-link" onclick="loadSuggerimentiVacanza()">↻ Aggiorna</div>
       </div>
-      <div class="card">
-        <div class="card-label">Vuoi il 25 Luglio libero?</div>
-        <div class="sug-item">
-          <div class="sug-top"><div class="sug-name">Marco Bianchi (Gr.12)</div><div class="sug-match">↔ Compatibile</div></div>
-          <div class="sug-detail">Lui: 13/18 ven 25 · Tu: 07/13 ven 1 ago → scambio 5h↔5h</div>
-        </div>
-        <div class="sug-item">
-          <div class="sug-top"><div class="sug-name">Laura Rossi (Gr.10)</div><div class="sug-match">↔ Quasi compatibile</div></div>
-          <div class="sug-detail">Lei: 14/19 gio 24 · Cambio doppio con recupero sabato</div>
-        </div>
-        <div style="font-size:11px;color:var(--text3);margin-top:8px;">💡 Basati sulla griglia di rotazione. Verifica col responsabile.</div>
-      </div>
+      <div id="suggerimentiVacanza"><div style="text-align:center;color:var(--text3);padding:20px;">Caricamento...</div></div>
     </div>
 
     <!-- ===== EMAIL ===== -->
@@ -662,12 +665,82 @@ function showCalDetail(day, turno, swap) {
 function prevMonth() { calMonth--; if(calMonth<0){calMonth=11;calYear--;} buildCal(); document.getElementById('calDayDetail').innerHTML=''; }
 function nextMonth() { calMonth++; if(calMonth>11){calMonth=0;calYear++;} buildCal(); document.getElementById('calDayDetail').innerHTML=''; }
 
+// ===== AUTOCOMPLETAMENTO COLLEGHI =====
+let selectedColleagueGroup = null;
+let cercaColleghiTimeout = null;
+
+function cercaColleghi(query) {
+  clearTimeout(cercaColleghiTimeout);
+  selectedColleagueGroup = null;
+  document.getElementById('colleagueGroupBadge').style.display = 'none';
+
+  if (!query || query.length < 2) {
+    document.getElementById('colleagueSuggestions').style.display = 'none';
+    return;
+  }
+  cercaColleghiTimeout = setTimeout(async () => {
+    const risultati = await apiFetch('/api/colleghi?q=' + encodeURIComponent(query));
+    const box = document.getElementById('colleagueSuggestions');
+    if (!risultati || !risultati.length) { box.style.display = 'none'; return; }
+
+    box.innerHTML = risultati.map(r => `
+      <div style="padding:10px 12px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px;"
+           onmousedown="selezionaCollega('${r.nome.replace(/'/g,"\\'")}', ${r.gruppo})">
+        <b>${r.nome}</b> <span style="color:var(--text3);font-size:11px;">Gruppo ${r.gruppo}</span>
+      </div>`).join('');
+    box.style.display = 'block';
+  }, 200);
+}
+
+function selezionaCollega(nome, gruppo) {
+  document.getElementById('sw_colleague').value = nome;
+  document.getElementById('colleagueSuggestions').style.display = 'none';
+  selectedColleagueGroup = gruppo;
+  document.getElementById('colleagueGroupText').textContent = `Gruppo ${gruppo}`;
+  document.getElementById('colleagueGroupBadge').style.display = 'block';
+}
+
+// Chiudi il dropdown se clicco fuori
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#sw_colleague') && !e.target.closest('#colleagueSuggestions')) {
+    const box = document.getElementById('colleagueSuggestions');
+    if (box) box.style.display = 'none';
+  }
+});
+
+// ===== VALIDAZIONE 11H IN TEMPO REALE =====
+let checkRiposoTimeout = null;
+function checkRiposo11h() {
+  clearTimeout(checkRiposoTimeout);
+  checkRiposoTimeout = setTimeout(async () => {
+    const data_ceduta = document.getElementById('sw_mydate').value;
+    const nuovo_orario = document.getElementById('sw_mytime').value; // l'orario che AVEVO quel giorno, ora ceduto -> diventa riposo
+    const warningBox = document.getElementById('riposo11hWarning');
+
+    if (!data_ceduta) { warningBox.style.display = 'none'; return; }
+
+    // Quando cedi il turno, quel giorno diventa riposo per te
+    const res = await apiFetch('/api/valida-cambio', {
+      method: 'POST',
+      body: JSON.stringify({ data_ceduta, nuovo_orario: 'Riposo' })
+    });
+
+    if (res && !res.valido) {
+      document.getElementById('riposo11hDetail').textContent = res.problemi.join(' · ');
+      warningBox.style.display = 'flex';
+    } else {
+      warningBox.style.display = 'none';
+    }
+  }, 300);
+}
+
 // ===== SAVE SWAP =====
 async function saveSwap() {
   const body = {
     data_ceduta: document.getElementById('sw_mydate').value,
     orario_ceduto: document.getElementById('sw_mytime').value,
     collega: document.getElementById('sw_colleague').value,
+    gruppo_collega: selectedColleagueGroup,
     data_ricevuta: document.getElementById('sw_theirdate').value,
     orario_ricevuto: document.getElementById('sw_theirtime').value,
     stato: document.getElementById('sw_status').value,
@@ -680,12 +753,80 @@ async function saveSwap() {
   if (res && res.ok) {
     ['sw_mydate','sw_mytime','sw_colleague','sw_theirdate','sw_theirtime','sw_notes'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('sw_status').value = 'pending';
+    document.getElementById('colleagueGroupBadge').style.display = 'none';
+    document.getElementById('riposo11hWarning').style.display = 'none';
+    selectedColleagueGroup = null;
     await loadCambi();
     buildWeekStrip();
     toast('✅ Cambio salvato! Visibile nel calendario.');
   } else {
     toast('Errore salvataggio', true);
   }
+}
+
+// ===== SUGGERIMENTI VACANZA =====
+async function loadSuggerimentiVacanza() {
+  const el = document.getElementById('suggerimentiVacanza');
+  el.innerHTML = '<div style="text-align:center;color:var(--text3);padding:20px;"><span class="spinner" style="border-top-color:var(--text2);"></span>Analisi calendario...</div>';
+
+  const res = await apiFetch('/api/suggerimenti-vacanza');
+  if (!res) { el.innerHTML = '<div style="text-align:center;color:var(--text3);padding:20px;">Errore caricamento</div>'; return; }
+
+  let html = '';
+
+  // Riposi doppi già esistenti
+  if (res.riposi_doppi_esistenti && res.riposi_doppi_esistenti.length) {
+    html += `<div class="card">
+      <div class="card-label">🏖️ Già liberi consecutivi</div>`;
+    res.riposi_doppi_esistenti.forEach(r => {
+      const dIn = new Date(r.data_inizio + 'T00:00:00');
+      const dFi = new Date(r.data_fine + 'T00:00:00');
+      html += `<div class="sug-item" style="border-left:3px solid var(--green);">
+        <div class="sug-top">
+          <div class="sug-name">${DAYS_S[dIn.getDay()]} ${dIn.getDate()} ${MONTHS_S[dIn.getMonth()]} → ${DAYS_S[dFi.getDay()]} ${dFi.getDate()} ${MONTHS_S[dFi.getMonth()]}</div>
+          <div class="sug-match">${r.giorni} giorni liberi</div>
+        </div>
+        <div class="sug-detail">Già disponibili senza bisogno di cambi — perfetto per una gita al mare!</div>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  // Proposte di cambio per crearne di nuovi
+  if (res.proposte_cambio && res.proposte_cambio.length) {
+    html += `<div class="card">
+      <div class="card-label">🔄 Cambi per creare riposi doppi</div>`;
+    res.proposte_cambio.forEach(p => {
+      const d = new Date(p.data_da_cedere + 'T00:00:00');
+      const okColor = p.validazione_11h === 'ok' ? 'var(--accent2)' : 'var(--orange)';
+      html += `<div class="sug-item" style="border-left:3px solid ${okColor};">
+        <div class="sug-top">
+          <div class="sug-name">${p.risultato}</div>
+          <div class="sug-match" style="color:${okColor};">${p.validazione_11h === 'ok' ? '✓ Rispetta 11h' : '⚠ Verifica 11h'}</div>
+        </div>
+        <div class="sug-detail">${p.nota}</div>
+        ${p.dettagli_11h && p.dettagli_11h.length ? `<div class="sug-detail" style="color:var(--orange);margin-top:4px;">${p.dettagli_11h.join(' · ')}</div>` : ''}
+        <button class="btn btn-secondary btn-sm" style="margin-top:8px;width:auto;" onclick="precompilaCambio('${p.data_da_cedere}','${p.orario_da_cedere}')">Compila il modulo →</button>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  if (!html) {
+    html = `<div class="card"><div style="text-align:center;color:var(--text3);padding:10px;">Nessun riposo doppio trovato nei prossimi 90 giorni. Carica il piano settimanale per calcolare i turni futuri.</div></div>`;
+  }
+
+  html += `<div style="font-size:11px;color:var(--text3);margin-top:4px;padding:0 4px;">💡 Tutti i suggerimenti rispettano il vincolo di 11h di riposo minimo tra un turno e l'altro. Verifica sempre col responsabile prima di accordarti con un collega.</div>`;
+
+  el.innerHTML = html;
+}
+
+function precompilaCambio(data, orario) {
+  document.getElementById('sw_mydate').value = data;
+  document.getElementById('sw_mytime').value = orario;
+  checkRiposo11h();
+  document.querySelector('#tab-cambi .card').scrollIntoView({ behavior: 'smooth' });
+  toast('Modulo precompilato — scegli ora il collega');
 }
 
 function renderSwapList() {
@@ -709,7 +850,7 @@ function renderSwapList() {
           </div>
         </div>
         <div class="swap-details">
-          <b>Cedo:</b> ${c.orario_ceduto} <span class="swap-arrow">⇄</span> <b>${c.collega}</b>
+          <b>Cedo:</b> ${c.orario_ceduto} <span class="swap-arrow">⇄</span> <b>${c.collega}</b>${c.gruppo_collega ? ` <span class="tag tag-blue" style="margin-left:2px;">Gr.${c.gruppo_collega}</span>` : ''}
           ${c.data_ricevuta ? `<br><b>Ricevo:</b> ${c.data_ricevuta} · ${c.orario_ricevuto}` : ''}
         </div>
         ${c.note ? `<div class="swap-notes">📝 ${c.note}</div>` : ''}
@@ -761,7 +902,20 @@ async function uploadFile(input, tipo) {
     const r = await fetch(API + '/api/upload', { method:'POST', body: fd });
     const data = await r.json();
     if (data.ok) {
-      toast(`✅ ${data.messaggio}`);
+      if (tipo === 'settimanale' && data.turni_calcolati) {
+        toast(`✅ ${data.turni_calcolati} turni calcolati e salvati!`);
+        // Ricarica tutto: turni aggiornati, vista Oggi, settimana, calendario
+        await loadTurni();
+        buildToday();
+        buildWeekStrip();
+        if (!document.getElementById('tab-calendario').classList.contains('hidden')) buildCal();
+
+        if (data.discrepanze && data.discrepanze.length > 0) {
+          setTimeout(() => toast(`⚠️ ${data.discrepanze.length} discrepanza/e rilevate rispetto al calcolo precedente`, true), 2000);
+        }
+      } else {
+        toast(`✅ ${data.messaggio}`);
+      }
       loadEmailLog();
     } else {
       toast('Errore: ' + (data.error || 'sconosciuto'), true);
@@ -798,6 +952,7 @@ function showTab(name) {
     el.classList.toggle('active', ['oggi','calendario','cambi','email','impostazioni'][i] === name);
   });
   if (name === 'calendario') { buildCal(); document.getElementById('calDayDetail').innerHTML = ''; }
+  if (name === 'cambi') { loadSuggerimentiVacanza(); }
 }
 
 // ===== EMAIL CONNECT =====

@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
+const parserTurni = require('../parser-turni');
+const { cercaCollega, trovaGruppoEsatto } = require('../colleghi');
 
 // ===== TURNI =====
 
@@ -46,7 +48,7 @@ router.get('/cambi', (req, res) => {
 });
 
 router.post('/cambi', (req, res) => {
-  const { data_ceduta, orario_ceduto, collega, data_ricevuta, orario_ricevuto, stato, note } = req.body;
+  const { data_ceduta, orario_ceduto, collega, gruppo_collega, data_ricevuta, orario_ricevuto, stato, note } = req.body;
   if (!data_ceduta || !orario_ceduto || !collega) {
     return res.status(400).json({ error: 'data_ceduta, orario_ceduto e collega sono obbligatori' });
   }
@@ -56,6 +58,7 @@ router.post('/cambi', (req, res) => {
     data_ceduta,
     orario_ceduto,
     collega,
+    gruppo_collega: gruppo_collega || null,
     data_ricevuta: data_ricevuta || '',
     orario_ricevuto: orario_ricevuto || '',
     stato: stato || 'pending',
@@ -132,3 +135,73 @@ router.post('/controlla-discrepanza', (req, res) => {
 });
 
 module.exports = router;
+
+// ===== COLLEGHI (autocompletamento) =====
+
+// GET /api/colleghi?q=man -> suggerimenti nome + gruppo
+router.get('/colleghi', (req, res) => {
+  const { q } = req.query;
+  const risultati = cercaCollega(q || '');
+  res.json(risultati);
+});
+
+// GET /api/colleghi/:nome -> gruppo esatto di un collega (match esatto)
+router.get('/colleghi/:nome', (req, res) => {
+  const gruppo = trovaGruppoEsatto(req.params.nome);
+  res.json({ nome: req.params.nome, gruppo });
+});
+
+// ===== VALIDAZIONE 11H =====
+
+// POST /api/valida-cambio -> verifica che cedere un turno e riceverne un altro rispetti le 11h
+// body: { data_ceduta, orario_ricevuto_al_posto } (l'orario che Giorgio avrà quel giorno DOPO il cambio)
+router.post('/valida-cambio', (req, res) => {
+  const { data_ceduta, nuovo_orario } = req.body;
+  if (!data_ceduta) return res.status(400).json({ error: 'data_ceduta obbligatoria' });
+
+  // Prendi tutti i turni ordinati, sostituendo quello del giorno del cambio col nuovo orario (se fornito)
+  const turni = [...db.get('turni').value()].sort((a, b) => a.data.localeCompare(b.data));
+  const turniSimulati = turni.map(t => {
+    if (t.data === data_ceduta && nuovo_orario) {
+      const classificato = parserTurni.classificaTurno(nuovo_orario);
+      return { ...t, orario: classificato.orario, tipo: classificato.tipo };
+    }
+    return t;
+  });
+
+  const risultato = parserTurni.verificaRiposo11h(turniSimulati, data_ceduta);
+  res.json(risultato);
+});
+
+// ===== SUGGERIMENTI VACANZA =====
+
+// GET /api/suggerimenti-vacanza -> riposi doppi già esistenti + proposte di cambio per crearne
+router.get('/suggerimenti-vacanza', (req, res) => {
+  const turni = [...db.get('turni').value()].sort((a, b) => a.data.localeCompare(b.data));
+
+  // Limita ai prossimi 90 giorni da oggi per non proporre cose troppo lontane
+  const oggi = new Date().toISOString().slice(0, 10);
+  const turniFuturi = turni.filter(t => t.data >= oggi);
+
+  const riposiEsistenti = parserTurni.trovaRiposiConsecutivi(turniFuturi);
+  const proposteCambio = parserTurni.suggerisciRiposiDoppi(turniFuturi);
+
+  // Per ogni proposta, verifica anche che cedere quel turno non violi le 11h
+  // (controllo del turno adiacente a quello che RESTA scoperto se lo cedo, dal lato opposto al riposo)
+  const proposteValidate = proposteCambio.map(p => {
+    const turniSimulati = turniFuturi.map(t => {
+      if (t.data === p.data_da_cedere) {
+        return { ...t, tipo: 'r', orario: 'Riposo' };
+      }
+      return t;
+    });
+    const validazione = parserTurni.verificaRiposo11h(turniSimulati, p.data_da_cedere);
+    return { ...p, validazione_11h: validazione.valido ? 'ok' : 'attenzione', dettagli_11h: validazione.problemi };
+  });
+
+  res.json({
+    riposi_doppi_esistenti: riposiEsistenti,
+    proposte_cambio: proposteValidate
+  });
+});
+
