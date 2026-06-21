@@ -14,6 +14,28 @@ const XLSX = require('xlsx');
 
 const TOTAL_GRUPPI = 15;
 
+/**
+ * Aggiunge un numero di giorni a una data lavorando sui componenti
+ * anno/mese/giorno (mai sommando millisecondi grezzi), per evitare
+ * che il cambio dell'ora legale (fine marzo / fine ottobre in Italia)
+ * faccia "raddoppiare" o "saltare" un giorno nel calcolo.
+ */
+function aggiungiGiorni(data, numGiorni) {
+  return new Date(data.getFullYear(), data.getMonth(), data.getDate() + numGiorni);
+}
+
+/**
+ * Formatta una data in YYYY-MM-DD usando i valori LOCALI (anno/mese/giorno),
+ * MAI passando per .toISOString() che converte in UTC e può far slittare
+ * la data di un giorno indietro nei fusi orari avanti rispetto a UTC (es. Italia).
+ */
+function formattaDataLocale(d) {
+  const anno = d.getFullYear();
+  const mese = String(d.getMonth() + 1).padStart(2, '0');
+  const giorno = String(d.getDate()).padStart(2, '0');
+  return `${anno}-${mese}-${giorno}`;
+}
+
 // Converte "12/17" in { tipo: 'p', orario: '12:00-17:00' } ecc.
 function classificaTurno(raw) {
   if (!raw) return null;
@@ -40,6 +62,53 @@ function classificaTurno(raw) {
 
   const orarioStr = `${String(oraInizio).padStart(2,'0')}:00-${String(oraFine).padStart(2,'0')}:00`;
   return { tipo, orario: orarioStr, raw: val };
+}
+
+const MESI_IT = {
+  GENNAIO: 0, FEBBRAIO: 1, MARZO: 2, APRILE: 3, MAGGIO: 4, GIUGNO: 5,
+  LUGLIO: 6, AGOSTO: 7, SETTEMBRE: 8, OTTOBRE: 9, NOVEMBRE: 10, DICEMBRE: 11
+};
+
+/**
+ * Cerca nelle prime righe del file il titolo tipo "TURNI DAL 22 AL 28 GIUGNO"
+ * e ne ricava la data del lunedì in formato ISO (YYYY-MM-DD).
+ * Se l'anno non è scritto nel titolo (caso comune), lo deduce scegliendo
+ * l'anno (corrente o successivo) che fa cadere quel giorno/mese di lunedì
+ * più vicino alla data odierna — evita di finire nel passato per errore.
+ */
+function estraiDataLunediDaTitolo(rows) {
+  const meseRegex = new RegExp(`\\b(${Object.keys(MESI_IT).join('|')})\\b`, 'i');
+
+  for (let i = 0; i < Math.min(rows.length, 5); i++) {
+    const testoRiga = rows[i].join(' ').toUpperCase();
+    const matchGiorni = testoRiga.match(/DAL\s+(\d{1,2})\s+AL\s+(\d{1,2})/);
+    const matchMese = testoRiga.match(meseRegex);
+    const matchAnno = testoRiga.match(/\b(20\d{2})\b/);
+
+    if (matchGiorni && matchMese) {
+      const giornoInizio = parseInt(matchGiorni[1]);
+      const mese = MESI_IT[matchMese[1].toUpperCase()];
+      let anno = matchAnno ? parseInt(matchAnno[1]) : null;
+
+      if (anno === null) {
+        // Anno non scritto nel file: scegli quello (corrente o adiacente)
+        // che porta la data più vicina a oggi, per evitare di sbagliare di un anno intero
+        const oggi = new Date();
+        const candidati = [oggi.getFullYear() - 1, oggi.getFullYear(), oggi.getFullYear() + 1];
+        let migliore = null, distanzaMin = Infinity;
+        candidati.forEach(annoTest => {
+          const d = new Date(annoTest, mese, giornoInizio);
+          const dist = Math.abs(d - oggi);
+          if (dist < distanzaMin) { distanzaMin = dist; migliore = annoTest; }
+        });
+        anno = migliore;
+      }
+
+      const data = new Date(anno, mese, giornoInizio);
+      return formattaDataLocale(data);
+    }
+  }
+  return null; // titolo non riconosciuto, il chiamante userà un fallback
 }
 
 /**
@@ -93,7 +162,10 @@ function leggiGrigliaSettimanale(filePath) {
     griglia[numGruppo] = turniSettimana;
   }
 
-  return { griglia, dateSettimana, headerRowIdx };
+  // Estrae automaticamente la data del lunedì dal titolo del foglio (es. "TURNI DAL 22 AL 28 GIUGNO")
+  const dataLunediRilevata = estraiDataLunediDaTitolo(rows.slice(0, headerRowIdx + 1));
+
+  return { griglia, dateSettimana, headerRowIdx, dataLunediRilevata };
 }
 
 /**
@@ -106,11 +178,11 @@ function leggiGrigliaSettimanale(filePath) {
  */
 function gruppoDaLeggere(gruppoPartenza, settimaneAvanti) {
   // Ogni settimana che passa, devo guardare un gruppo più in alto di 1
-  // (con wraparound nel ciclo 1-15)
+  // (con wraparound corretto nel ciclo 1-15, valido sia per numeri
+  // positivi che negativi — usare SEMPRE questa forma con il doppio
+  // "+ totale) % totale" per evitare risultati shiftati di una posizione).
   let g = gruppoPartenza + settimaneAvanti;
-  // Riporta g nel range 1-15
-  g = ((g - 1) % TOTAL_GRUPPI) + TOTAL_GRUPPI;
-  g = ((g - 1) % TOTAL_GRUPPI) + 1;
+  g = ((g - 1) % TOTAL_GRUPPI + TOTAL_GRUPPI) % TOTAL_GRUPPI + 1;
   return g;
 }
 
@@ -134,8 +206,8 @@ function calcolaTurniFuturi(dataLunedi, griglia, gruppoGiorgio, numSettimane) {
     if (!turniSettimana) continue; // gruppo non presente in questa griglia di riferimento
 
     for (let d = 0; d < 7; d++) {
-      const data = new Date(start.getTime() + (s * 7 + d) * 86400000);
-      const dataStr = data.toISOString().slice(0, 10);
+      const data = aggiungiGiorni(start, s * 7 + d);
+      const dataStr = formattaDataLocale(data);
       const turno = turniSettimana[d];
       if (!turno) continue;
 
@@ -148,6 +220,56 @@ function calcolaTurniFuturi(dataLunedi, griglia, gruppoGiorgio, numSettimane) {
         nota: `Calcolato da Gruppo ${gruppoDaUsare} (settimana +${s})`
       });
     }
+  }
+
+  return risultato;
+}
+
+/**
+ * Calcola i turni PASSATI del gruppo di Giorgio, andando a ritroso nel
+ * tempo dalla settimana di riferimento (quella della griglia caricata)
+ * fino a una data minima (es. inizio aprile), usando la stessa identica
+ * logica di rotazione di calcolaTurniFuturi ma con settimane negative.
+ *
+ * dataLunedi: lunedì della settimana di riferimento (quella nella griglia)
+ * griglia: { numGruppo: [7 turni] } della settimana di riferimento
+ * gruppoGiorgio: 11
+ * dataMinima: stringa ISO (YYYY-MM-DD) oltre la quale non andare indietro
+ */
+function calcolaTurniPassati(dataLunedi, griglia, gruppoGiorgio, dataMinima) {
+  const risultato = [];
+  const start = new Date(dataLunedi + 'T00:00:00');
+  const minimo = new Date(dataMinima + 'T00:00:00');
+
+  let s = -1; // si parte dalla settimana precedente a quella di riferimento (s=0 è già coperta da calcolaTurniFuturi)
+  while (true) {
+    const lunediSettimana = aggiungiGiorni(start, s * 7);
+    if (lunediSettimana < minimo) break; // oltrepassato il limite, fermati
+
+    const gruppoDaUsare = gruppoDaLeggere(gruppoGiorgio, s);
+    const turniSettimana = griglia[gruppoDaUsare];
+
+    if (turniSettimana) {
+      for (let d = 0; d < 7; d++) {
+        const data = aggiungiGiorni(start, s * 7 + d);
+        if (data < minimo) continue; // salta i singoli giorni prima del limite nella settimana di confine
+        const dataStr = formattaDataLocale(data);
+        const turno = turniSettimana[d];
+        if (!turno) continue;
+
+        risultato.push({
+          data: dataStr,
+          orario: turno.orario,
+          tipo: turno.tipo,
+          fonte: 'calcolato',
+          gruppo_origine: gruppoDaUsare,
+          nota: `Calcolato a ritroso da Gruppo ${gruppoDaUsare} (settimana ${s})`
+        });
+      }
+    }
+
+    s -= 1;
+    if (s < -104) break; // sicurezza anti-loop-infinito: max 2 anni indietro
   }
 
   return risultato;
@@ -168,8 +290,8 @@ function confrontaConNuovoFile(turniCalcolati, nuovaGriglia, dataLunediNuovaSett
   const discrepanze = [];
 
   for (let d = 0; d < 7; d++) {
-    const data = new Date(start.getTime() + d * 86400000);
-    const dataStr = data.toISOString().slice(0, 10);
+    const data = aggiungiGiorni(start, d);
+    const dataStr = formattaDataLocale(data);
     const atteso = turnoAttesoMap[dataStr];
     const reale = turniNuovi[d];
 
@@ -352,13 +474,17 @@ function suggerisciRiposiDoppi(turni) {
 module.exports = {
   classificaTurno,
   leggiGrigliaSettimanale,
+  estraiDataLunediDaTitolo,
   gruppoDaLeggere,
   calcolaTurniFuturi,
+  calcolaTurniPassati,
   confrontaConNuovoFile,
   estraiOrari,
   oreRiposoTra,
   verificaRiposo11h,
   trovaRiposiConsecutivi,
   suggerisciRiposiDoppi,
+  formattaDataLocale,
+  aggiungiGiorni,
   TOTAL_GRUPPI
 };
