@@ -78,25 +78,30 @@
   .cal-cell{aspect-ratio:1;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;position:relative;background:var(--surface2);border:1.5px solid transparent;overflow:hidden;}
   .cal-cell.empty{background:transparent;cursor:default;}
   .cal-cell.today-cal{border-color:var(--accent);}
-  .cal-cell.swap-cal{border-color:var(--swap);}
+  .cal-cell.swap-cal{border-color:var(--swap);border-width:2px;}
   .cal-cell.cm{background:#1a2d4a;} .cal-cell.cp{background:#1a3020;}
   .cal-cell.cs,.cal-cell.cn{background:#241a3a;} .cal-cell.cr{background:var(--surface);}
-  .cal-cell.swap-cal.cm{background:linear-gradient(135deg,#1a2d4a 55%,#2d2000 55%);}
-  .cal-cell.swap-cal.cp{background:linear-gradient(135deg,#1a3020 55%,#2d2000 55%);}
-  .cal-cell.swap-cal.cs{background:linear-gradient(135deg,#241a3a 55%,#2d2000 55%);}
-  .cal-cell.swap-cal.cr{background:linear-gradient(135deg,#1a1d27 55%,#2d2000 55%);}
+  /* Il colore di sfondo della cella riflette SEMPRE il turno EFFETTIVO (dopo il cambio),
+     non più uno split diagonale: il turno nuovo è quello vero, quindi prende tutto lo sfondo.
+     Il piccolo indicatore in basso (swap-dot + barra sottile) segnala solo che c'è stato un cambio. */
+  .cal-cell.swap-cal::after{content:'';position:absolute;bottom:0;left:0;right:0;height:3px;background:var(--swap);opacity:.85;}
   .cn-num{font-size:12px;font-weight:700;}
   .cn-m{color:#60a5fa;} .cn-p{color:#34d399;} .cn-s,.cn-n{color:#a78bfa;} .cn-r{color:var(--text3);} .cn-swap{color:var(--swap);}
   .cc{font-size:7px;font-weight:700;margin-top:1px;}
   .swap-dot{position:absolute;bottom:2px;right:2px;width:6px;height:6px;border-radius:50%;background:var(--swap);}
+  .note-indicator{position:absolute;top:2px;left:2px;font-size:8px;line-height:1;}
   .legend{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);}
   .li{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text2);}
   .ld{width:10px;height:10px;border-radius:3px;flex-shrink:0;}
 
   /* DETAIL split */
-  .detail-split{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;}
-  .det-col{background:var(--surface2);border-radius:var(--radius-sm);padding:10px;}
-  .det-col.orig{border-top:2px solid #60a5fa;} .det-col.swp{border-top:2px solid var(--swap);}
+  /* Box dettaglio giorno: il turno EFFETTIVO (dopo il cambio) è il protagonista,
+     quello originale/ceduto è solo una riga piccola e discreta sotto. */
+  .det-effettivo{background:var(--surface2);border-radius:var(--radius-sm);padding:14px;border-left:4px solid var(--swap);margin-top:10px;}
+  .det-effettivo .det-lbl{font-size:10px;font-weight:700;color:var(--swap);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;}
+  .det-effettivo .det-time-big{font-family:'DM Mono',monospace;font-size:24px;font-weight:600;}
+  .det-originale-riga{display:flex;align-items:center;gap:6px;margin-top:8px;padding:6px 10px;background:var(--bg);border-radius:6px;opacity:.65;}
+  .det-originale-riga .det-time-small{font-family:'DM Mono',monospace;font-size:12px;text-decoration:line-through;color:var(--text3);}
   .det-lbl{font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;}
   .det-time{font-family:'DM Mono',monospace;font-size:14px;font-weight:600;}
   .det-note{font-size:10px;color:var(--text3);margin-top:3px;}
@@ -238,7 +243,14 @@
         <div class="row"><span class="rl">Ore totali</span><span class="rv" id="statOre">25h / 25h</span></div>
         <div class="row"><span class="rl">Giorni lavorati</span><span class="rv" id="statGiorni">5 / 5</span></div>
         <div class="row"><span class="rl">Cambi attivi</span><span class="rv" id="statCambi" style="color:var(--swap)">–</span></div>
-        <div class="row"><span class="rl">Stima paga netta</span><span class="rv" id="statPaga" style="color:var(--green)">€ –</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-label">Questo mese</div>
+        <div class="row"><span class="rl">Ore notturne (20-08)</span><span class="rv" id="statOreNotturne" style="color:var(--purple)">–</span></div>
+        <div class="row"><span class="rl">Ore lavorate totali</span><span class="rv" id="statOreMese">–</span></div>
+        <div class="row"><span class="rl">Stima paga (con magg.)</span><span class="rv" id="statPaga" style="color:var(--green)">€ –</span></div>
+        <div class="section-link" style="margin-top:8px;display:inline-block;" onclick="showTab('impostazioni')">Vedi dettaglio completo →</div>
       </div>
     </div>
 
@@ -275,7 +287,25 @@
           </div>
           <div class="form-group">
             <label class="form-label">Orario ceduto</label>
-            <input type="text" class="form-input" id="sw_mytime" placeholder="es. 13:00–18:00" oninput="checkRiposo11h()">
+            <select class="form-input" id="sw_mytime" onchange="checkRiposo11h()">
+              <option value="">Scegli il turno...</option>
+              <option value="Riposo">Riposo</option>
+              <option value="05:00-10:00">05:00 – 10:00</option>
+              <option value="07:00-12:00">07:00 – 12:00</option>
+              <option value="08:00-13:00">08:00 – 13:00</option>
+              <option value="09:00-14:00">09:00 – 14:00</option>
+              <option value="10:00-15:00">10:00 – 15:00</option>
+              <option value="11:00-16:00">11:00 – 16:00</option>
+              <option value="12:00-17:00">12:00 – 17:00</option>
+              <option value="13:00-18:00">13:00 – 18:00</option>
+              <option value="14:00-19:00">14:00 – 19:00</option>
+              <option value="15:00-20:00">15:00 – 20:00</option>
+              <option value="16:00-21:00">16:00 – 21:00</option>
+              <option value="17:00-22:00">17:00 – 22:00</option>
+              <option value="18:00-23:00">18:00 – 23:00</option>
+              <option value="19:00-24:00">19:00 – 24:00</option>
+              <option value="20:00-01:00">20:00 – 01:00 (notte)</option>
+            </select>
           </div>
         </div>
         <div class="form-group" style="position:relative;">
@@ -293,7 +323,25 @@
           </div>
           <div class="form-group">
             <label class="form-label">Orario ricevuto</label>
-            <input type="text" class="form-input" id="sw_theirtime" placeholder="es. 07:00–13:00">
+            <select class="form-input" id="sw_theirtime">
+              <option value="">Scegli il turno...</option>
+              <option value="Riposo">Riposo</option>
+              <option value="05:00-10:00">05:00 – 10:00</option>
+              <option value="07:00-12:00">07:00 – 12:00</option>
+              <option value="08:00-13:00">08:00 – 13:00</option>
+              <option value="09:00-14:00">09:00 – 14:00</option>
+              <option value="10:00-15:00">10:00 – 15:00</option>
+              <option value="11:00-16:00">11:00 – 16:00</option>
+              <option value="12:00-17:00">12:00 – 17:00</option>
+              <option value="13:00-18:00">13:00 – 18:00</option>
+              <option value="14:00-19:00">14:00 – 19:00</option>
+              <option value="15:00-20:00">15:00 – 20:00</option>
+              <option value="16:00-21:00">16:00 – 21:00</option>
+              <option value="17:00-22:00">17:00 – 22:00</option>
+              <option value="18:00-23:00">18:00 – 23:00</option>
+              <option value="19:00-24:00">19:00 – 24:00</option>
+              <option value="20:00-01:00">20:00 – 01:00 (notte)</option>
+            </select>
           </div>
         </div>
         <div class="form-group">
@@ -338,12 +386,14 @@
     <!-- ===== EMAIL ===== -->
     <div id="tab-email" class="hidden">
 
-      <div class="card" style="margin-top:4px;background:linear-gradient(135deg,#1e3a5f,#1a2040);border-color:#2e4a7a;text-align:center;">
+      <div class="card" id="gmailConnectCard" style="margin-top:4px;background:linear-gradient(135deg,#1e3a5f,#1a2040);border-color:#2e4a7a;text-align:center;">
         <div style="font-size:32px;margin-bottom:8px;">📧</div>
-        <div style="font-size:16px;font-weight:700;margin-bottom:6px;">Connetti la tua email</div>
-        <div style="font-size:12px;color:var(--text2);margin-bottom:14px;line-height:1.5;">L'app leggerà automaticamente settimanale e giornaliero ogni giorno.</div>
-        <button class="btn btn-primary" onclick="connectEmail('gmail')">📥 Connetti Gmail</button>
-        <button class="btn btn-secondary" onclick="connectEmail('outlook')">📥 Connetti Outlook</button>
+        <div id="gmailStatusTitle" style="font-size:16px;font-weight:700;margin-bottom:6px;">Connetti la tua email</div>
+        <div id="gmailStatusSub" style="font-size:12px;color:var(--text2);margin-bottom:14px;line-height:1.5;">L'app leggerà automaticamente settimanale e giornaliero ogni giorno.</div>
+        <div id="gmailActions">
+          <button class="btn btn-primary" onclick="window.location.href='/auth/google'">📥 Connetti Gmail</button>
+          <button class="btn btn-secondary" onclick="connectEmail('outlook')">📥 Connetti Outlook</button>
+        </div>
       </div>
 
       <div class="card">
@@ -380,12 +430,12 @@
       </div>
 
       <div class="card">
-        <div class="card-label">Paga oraria</div>
+        <div class="card-label">Paga oraria base</div>
         <div style="display:flex;align-items:center;gap:12px;padding:8px 0;">
           <input type="range" id="paySlider" min="8" max="22" value="12" step="0.5" style="flex:1;accent-color:var(--accent);" oninput="updatePay()">
           <span id="payVal" style="font-family:'DM Mono',monospace;font-size:16px;font-weight:700;color:var(--green);min-width:52px;">€12.0</span>
         </div>
-        <div style="font-size:11px;color:var(--text3);">Stima mensile: <span id="monthPay" style="color:var(--green);font-weight:700;">€ 1.300</span> · +25% notte · +50% festivi</div>
+        <div style="font-size:11px;color:var(--text3);">Le maggiorazioni (notturno, festivo, straordinario) si calcolano automaticamente su questa base.</div>
       </div>
 
       <div class="card">
@@ -409,14 +459,50 @@
       </div>
 
       <div class="card">
-        <div class="card-label">Stima stipendio mensile</div>
-        <div class="pay-big">
-          <div class="pay-amount" id="bigPay">€ 1.300</div>
-          <div class="pay-label">25h/sett × 4 settimane</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <div class="card-label" style="margin-bottom:0;">Stipendio mensile</div>
+          <select class="form-input" id="meseStipendioSelect" style="width:auto;padding:6px 10px;font-size:12px;" onchange="caricaRiepilogoPagaCompleto()"></select>
         </div>
-        <div class="row"><span class="rl">Ore normali</span><span class="rv">87h → €1.044</span></div>
-        <div class="row"><span class="rl">Notturne (+25%)</span><span class="rv">13h → €195</span></div>
-        <div class="row"><span class="rl">Festivi (+50%)</span><span class="rv">5h → €90</span></div>
+        <div class="pay-big">
+          <div class="pay-amount" id="bigPay">€ –</div>
+          <div class="pay-label" id="payLabelOre">– ore lavorate</div>
+        </div>
+        <div class="row"><span class="rl">Ore diurne feriali</span><span class="rv" id="rOreDiurneFeriali">–</span></div>
+        <div class="row"><span class="rl">Ore notturne feriali (+50%)</span><span class="rv" id="rOreNottFeriali">–</span></div>
+        <div class="row"><span class="rl">Ore diurne festive (+45%)</span><span class="rv" id="rOreDiurneFestive">–</span></div>
+        <div class="row"><span class="rl">Ore notturne festive (+55%)</span><span class="rv" id="rOreNottFestive">–</span></div>
+        <div class="row"><span class="rl">Paga ordinaria</span><span class="rv" id="rPagaOrdinaria">–</span></div>
+        <div class="row"><span class="rl">Paga straordinari</span><span class="rv" id="rPagaStraordinari" style="color:var(--orange)">–</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-label">Aggiungi ore di straordinario</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Data</label>
+            <input type="date" class="form-input" id="str_data">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Ore</label>
+            <input type="number" class="form-input" id="str_ore" min="0.5" step="0.5" placeholder="es. 2">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="display:flex;align-items:center;gap:8px;padding-top:18px;">
+            <input type="checkbox" id="str_notturno" style="width:18px;height:18px;">
+            <label for="str_notturno" style="font-size:13px;">Notturno (20-08)</label>
+          </div>
+          <div class="form-group" style="display:flex;align-items:center;gap:8px;padding-top:18px;">
+            <input type="checkbox" id="str_riposo" style="width:18px;height:18px;">
+            <label for="str_riposo" style="font-size:13px;">In giorno di riposo</label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Note (opzionale)</label>
+          <input type="text" class="form-input" id="str_note" placeholder="es. copertura urgente">
+        </div>
+        <button class="btn btn-purple" onclick="aggiungiStraordinario()">+ Aggiungi straordinario</button>
+        <div id="listaStraordinari" style="margin-top:12px;"></div>
       </div>
     </div>
 
@@ -437,6 +523,23 @@ let allTurni = []; // turni dal server
 let allCambi = []; // cambi dal server
 let calYear = new Date().getFullYear();
 let calMonth = new Date().getMonth();
+
+// ===== HELPER DATE SICURI =====
+// MAI usare .toISOString() per formattare una data locale: converte in UTC
+// e può far slittare il giorno indietro (es. in Italia, mezzanotte locale
+// diventa le 22:00 del giorno prima in UTC). Usare sempre questa funzione.
+function formattaDataLocale(d) {
+  const anno = d.getFullYear();
+  const mese = String(d.getMonth() + 1).padStart(2, '0');
+  const giorno = String(d.getDate()).padStart(2, '0');
+  return `${anno}-${mese}-${giorno}`;
+}
+
+// Aggiunge giorni lavorando sui componenti della data (mai sommando
+// millisecondi grezzi), per evitare bug nei cambi di ora legale.
+function aggiungiGiorniLocale(d, numGiorni) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + numGiorni);
+}
 
 // ===== API HELPERS =====
 async function apiFetch(path, opts = {}) {
@@ -459,6 +562,17 @@ async function init() {
   buildToday();
   buildWeekStrip();
   loadEmailLog();
+  popolaSelettoreMesi();
+
+  // Carica la paga oraria salvata in precedenza (se diversa dal default 12)
+  const impostazioni = await apiFetch('/api/impostazioni');
+  if (impostazioni && impostazioni.paga_oraria) {
+    const slider = document.getElementById('paySlider');
+    if (slider) {
+      slider.value = impostazioni.paga_oraria;
+      document.getElementById('payVal').textContent = '€' + parseFloat(impostazioni.paga_oraria).toFixed(1);
+    }
+  }
 }
 
 // ===== TURNI =====
@@ -486,47 +600,94 @@ function getSwap(dateStr) {
 // ===== TODAY =====
 function buildToday() {
   const now = new Date();
-  const dateStr = now.toISOString().slice(0,10);
-  const turno = getTurno(dateStr);
+  const dateStr = formattaDataLocale(now);
+  const turnoOriginale = getTurno(dateStr);
   const swap = getSwap(dateStr);
+
+  // Se c'è un cambio per oggi, il turno "vero" da mostrare in home è quello
+  // RICEVUTO dal collega (o "Riposo" se ha solo ceduto senza ricevere nulla),
+  // non più il turno originale che ormai non è più suo.
+  let turnoEffettivo = turnoOriginale;
+  if (swap) {
+    if (swap.orario_ricevuto && swap.data_ricevuta === dateStr) {
+      // Caso raro: il turno ricevuto cade proprio oggi con orario specifico
+      const classificato = classificaOrarioSemplice(swap.orario_ricevuto);
+      turnoEffettivo = { ...turnoOriginale, orario: swap.orario_ricevuto, tipo: classificato };
+    } else {
+      // Caso normale: oggi Giorgio ha CEDUTO il turno → oggi è libero
+      turnoEffettivo = { ...turnoOriginale, orario: 'Riposo', tipo: 'r' };
+    }
+  }
 
   const dayNames = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
   document.getElementById('todayLabel').textContent =
     dayNames[now.getDay()] + ' ' + now.getDate() + ' ' + MONTHS[now.getMonth()] + ' ' + now.getFullYear();
 
-  if (turno) {
-    document.getElementById('todayTime').textContent = turno.orario;
-    const t = turno.tipo;
+  if (turnoEffettivo) {
+    document.getElementById('todayTime').textContent = turnoEffettivo.orario;
+    const t = turnoEffettivo.tipo;
     const badgeClass = {m:'bm',p:'bp',s:'bs',n:'bn',r:'br'}[t] || 'br';
     const badge = document.getElementById('todayBadge');
     badge.textContent = TYPE_LABEL[t] || '–';
     badge.className = 'shift-badge ' + badgeClass;
-    document.getElementById('todayNote').textContent = turno.note || '';
+    document.getElementById('todayNote').textContent = turnoOriginale ? (turnoOriginale.note || '') : '';
     document.getElementById('todayTags').innerHTML =
       (t === 's' || t === 'n') ? '<span class="tag tag-orange">Maggiorazione notturna</span>' : '';
     if (swap) {
+      const swapLabel = (swap.orario_ricevuto && swap.data_ricevuta === dateStr)
+        ? `⇄ Turno ricevuto da ${swap.collega} (originale: ${turnoOriginale ? turnoOriginale.orario : '–'})`
+        : `⇄ Ceduto a ${swap.collega} (era: ${turnoOriginale ? turnoOriginale.orario : '–'})`;
       document.getElementById('todayTags').innerHTML +=
-        `<span class="tag tag-swap">⇄ Cambio con ${swap.collega}</span>`;
+        `<span class="tag tag-swap">${swapLabel}</span>`;
     }
   } else {
     document.getElementById('todayTime').textContent = 'Nessun turno';
     document.getElementById('todayBadge').textContent = '–';
   }
 
-  // Stats
+  // Stats settimana
   const thisMon = getWeekStart(now);
   const weekTurni = allTurni.filter(t => {
-    const d = new Date(t.data); return d >= thisMon && d < new Date(thisMon.getTime() + 7*86400000);
+    const d = new Date(t.data + 'T00:00:00'); return d >= thisMon && d < aggiungiGiorniLocale(thisMon, 7);
   });
   const lavorati = weekTurni.filter(t => t.tipo !== 'r').length;
   document.getElementById('statOre').textContent = (lavorati * 5) + 'h / 25h';
   document.getElementById('statGiorni').textContent = lavorati + ' / 5';
   const cambiSettimana = allCambi.filter(c => {
-    const d = new Date(c.data_ceduta); return d >= thisMon && d < new Date(thisMon.getTime() + 7*86400000);
+    const d = new Date(c.data_ceduta + 'T00:00:00'); return d >= thisMon && d < aggiungiGiorniLocale(thisMon, 7);
   });
   document.getElementById('statCambi').textContent = cambiSettimana.length + ' cambio/i';
-  const paga = parseFloat(document.getElementById('paySlider')?.value || 12);
-  document.getElementById('statPaga').textContent = '€ ' + Math.round(paga * 25 * 0.85 * 4 / 4.33);
+
+  // Stats mese (ore notturne + paga reale con maggiorazioni, dal backend)
+  caricaStatisticheMese();
+}
+
+async function caricaStatisticheMese() {
+  const meseCorrente = formattaDataLocale(new Date()).slice(0, 7); // YYYY-MM
+  const [oreNotturne, riepilogoPaga] = await Promise.all([
+    apiFetch(`/api/ore-notturne-mese?mese=${meseCorrente}`),
+    apiFetch(`/api/paga-mensile?mese=${meseCorrente}`)
+  ]);
+
+  if (oreNotturne) {
+    document.getElementById('statOreNotturne').textContent = oreNotturne.ore_notturne.toFixed(1) + 'h';
+  }
+  if (riepilogoPaga) {
+    document.getElementById('statOreMese').textContent = riepilogoPaga.oreLavorateTotali.toFixed(1) + 'h';
+    document.getElementById('statPaga').textContent = '€ ' + riepilogoPaga.pagaTotale.toFixed(2);
+  }
+}
+
+// Classificazione rapida tipo turno da un orario "HH:MM-HH:MM" (per i casi raramente serviti lato client)
+function classificaOrarioSemplice(orarioStr) {
+  if (!orarioStr || orarioStr.toLowerCase().includes('riposo')) return 'r';
+  const match = orarioStr.match(/(\d{1,2}):/);
+  if (!match) return 'r';
+  const ora = parseInt(match[1]);
+  if (ora >= 5 && ora < 11) return 'm';
+  if (ora >= 11 && ora < 16) return 'p';
+  if (ora >= 16 && ora < 20) return 's';
+  return 'n';
 }
 
 function getWeekStart(d) {
@@ -544,12 +705,22 @@ function buildWeekStrip() {
   const dayNames = ['Lu','Ma','Me','Gi','Ve','Sa','Do'];
 
   for (let i = 0; i < 7; i++) {
-    const d = new Date(monday.getTime() + i * 86400000);
-    const dateStr = d.toISOString().slice(0,10);
-    const turno = getTurno(dateStr);
+    const d = aggiungiGiorniLocale(monday, i);
+    const dateStr = formattaDataLocale(d);
+    const turnoOriginale = getTurno(dateStr);
     const swap = getSwap(dateStr);
     const isToday = d.toDateString() === now.toDateString();
-    const t = turno ? turno.tipo : '';
+
+    // Stesso principio della home: se oggi/quel giorno è coinvolto in un
+    // cambio, il pallino e il tipo mostrato devono riflettere il turno
+    // EFFETTIVO (dopo il cambio), non quello originale ormai ceduto.
+    let turnoEffettivo = turnoOriginale;
+    if (swap) {
+      turnoEffettivo = (swap.orario_ricevuto && swap.data_ricevuta === dateStr)
+        ? { ...turnoOriginale, tipo: classificaOrarioSemplice(swap.orario_ricevuto) }
+        : { ...turnoOriginale, tipo: 'r' };
+    }
+    const t = turnoEffettivo ? turnoEffettivo.tipo : '';
 
     const pill = document.createElement('div');
     pill.className = 'dp' + (isToday ? ' today' : '') + (swap ? ' has-swap' : '');
@@ -557,17 +728,29 @@ function buildWeekStrip() {
     if (swap) dots += `<div class="dot dot-swap"></div>`;
     dots += '</div>';
     pill.innerHTML = `<div class="dp-name">${dayNames[i]}</div><div class="dp-num">${d.getDate()}</div>${dots}`;
-    pill.onclick = () => showWeekDay(d, turno, swap);
+    pill.onclick = () => showWeekDay(d, turnoOriginale, swap, dateStr);
     strip.appendChild(pill);
   }
 }
 
-function showWeekDay(d, turno, swap) {
-  const t = turno ? turno.tipo : 'r';
-  let html = `<b style="color:var(--text)">${DAYS_S[d.getDay()]} ${d.getDate()} ${MONTHS_S[d.getMonth()]}</b>
-    &nbsp;·&nbsp; <span style="color:${TYPE_COLOR[t]}">${TYPE_LABEL[t]}</span>
-    &nbsp;·&nbsp; <span style="font-family:'DM Mono',monospace">${turno ? turno.orario : 'Riposo'}</span>`;
-  if (swap) html += ` &nbsp;<span class="tag tag-swap">⇄ ${swap.collega}</span>`;
+function showWeekDay(d, turnoOriginale, swap, dateStr) {
+  let html, t, orarioMostrato;
+
+  if (swap) {
+    const isOggiRicevuto = swap.orario_ricevuto && swap.data_ricevuta === dateStr;
+    t = isOggiRicevuto ? classificaOrarioSemplice(swap.orario_ricevuto) : 'r';
+    orarioMostrato = isOggiRicevuto ? swap.orario_ricevuto : 'Riposo (ceduto)';
+    html = `<b style="color:var(--text)">${DAYS_S[d.getDay()]} ${d.getDate()} ${MONTHS_S[d.getMonth()]}</b>
+      &nbsp;·&nbsp; <span style="color:${TYPE_COLOR[t]}">${TYPE_LABEL[t]}</span>
+      &nbsp;·&nbsp; <span style="font-family:'DM Mono',monospace">${orarioMostrato}</span>
+      &nbsp;<span class="tag tag-swap">⇄ ${isOggiRicevuto ? 'Ricevuto da' : 'Ceduto a'} ${swap.collega}</span>
+      &nbsp;<span style="font-size:11px;color:var(--text3);">(originale: ${turnoOriginale ? turnoOriginale.orario : '–'})</span>`;
+  } else {
+    t = turnoOriginale ? turnoOriginale.tipo : 'r';
+    html = `<b style="color:var(--text)">${DAYS_S[d.getDay()]} ${d.getDate()} ${MONTHS_S[d.getMonth()]}</b>
+      &nbsp;·&nbsp; <span style="color:${TYPE_COLOR[t]}">${TYPE_LABEL[t]}</span>
+      &nbsp;·&nbsp; <span style="font-family:'DM Mono',monospace">${turnoOriginale ? turnoOriginale.orario : 'Riposo'}</span>`;
+  }
   document.getElementById('weekDayInfo').innerHTML = html;
 }
 
@@ -575,9 +758,14 @@ function showWeekDay(d, turno, swap) {
 async function buildCal() {
   document.getElementById('calMonthLabel').textContent = MONTHS[calMonth] + ' ' + calYear;
   const meseStr = `${calYear}-${String(calMonth+1).padStart(2,'0')}`;
-  const turniMese = await apiFetch(`/api/turni?mese=${meseStr}`) || [];
+  const [turniMese, noteMese] = await Promise.all([
+    apiFetch(`/api/turni?mese=${meseStr}`),
+    apiFetch(`/api/note?mese=${meseStr}`)
+  ]);
   const turniMap = {};
-  turniMese.forEach(t => turniMap[t.data] = t);
+  (turniMese || []).forEach(t => turniMap[t.data] = t);
+  const noteMap = {};
+  (noteMese || []).forEach(n => noteMap[n.data] = n);
 
   const grid = document.getElementById('calGrid');
   grid.innerHTML = '';
@@ -596,69 +784,116 @@ async function buildCal() {
 
   for (let day = 1; day <= daysInMonth; day++) {
     const dateStr = `${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-    const turno = turniMap[dateStr] || null;
+    const turnoOriginale = turniMap[dateStr] || null;
     const swap = getSwap(dateStr);
-    const t = turno ? turno.tipo : '';
     const isToday = (day === now.getDate() && calMonth === now.getMonth() && calYear === now.getFullYear());
+
+    // Il turno EFFETTIVO determina colore/badge della cella: se c'è un cambio,
+    // non è più quello originale (ceduto), ma quello ricevuto (o Riposo).
+    let tEffettivo = turnoOriginale ? turnoOriginale.tipo : '';
+    if (swap) {
+      tEffettivo = (swap.orario_ricevuto && swap.data_ricevuta === dateStr)
+        ? classificaOrarioSemplice(swap.orario_ricevuto)
+        : 'r';
+    }
 
     const cell = document.createElement('div');
     let cls = 'cal-cell';
-    if (t) cls += ' c' + t;
+    if (tEffettivo) cls += ' c' + tEffettivo;
     if (isToday) cls += ' today-cal';
     if (swap) cls += ' swap-cal';
     cell.className = cls;
 
-    const numCls = swap ? 'cn-swap' : ('cn-' + (t || 'r'));
+    const numCls = 'cn-' + (tEffettivo || 'r');
     cell.innerHTML = `<div class="cn-num ${numCls}">${day}</div>`;
-    if (t && t !== 'r') cell.innerHTML += `<div class="cc" style="color:${TYPE_COLOR[t]}">${t.toUpperCase()}</div>`;
+    if (tEffettivo && tEffettivo !== 'r') cell.innerHTML += `<div class="cc" style="color:${TYPE_COLOR[tEffettivo]}">${tEffettivo.toUpperCase()}</div>`;
     if (swap) cell.innerHTML += `<div class="swap-dot"></div>`;
+    if (noteMap[dateStr]) cell.innerHTML += `<div class="note-indicator">📝</div>`;
 
-    cell.onclick = () => showCalDetail(day, turno, swap);
+    cell.onclick = () => showCalDetail(day, turnoOriginale, swap, dateStr);
     grid.appendChild(cell);
   }
 }
 
-function showCalDetail(day, turno, swap) {
+function showCalDetail(day, turnoOriginale, swap, dateStr) {
   const el = document.getElementById('calDayDetail');
-  if (!turno && !swap) { el.innerHTML = ''; return; }
-  const t = turno ? turno.tipo : 'r';
+  if (!turnoOriginale && !swap) {
+    // Nessun turno calcolato per questo giorno, ma può comunque avere una nota personale
+    el.innerHTML = `<div class="card"><div class="card-label">${day} ${MONTHS_S[calMonth]} ${calYear}</div></div>` + blocoNotaPersonale(dateStr);
+    caricaNotaPersonale(dateStr);
+    return;
+  }
   const dateLabel = `${day} ${MONTHS_S[calMonth]} ${calYear}`;
 
   if (swap) {
     const statusMap = {ok:'✅ APPROVATO', pending:'⏳ IN ATTESA', denied:'❌ RIFIUTATO'};
     const statusCls = {ok:'so', pending:'sp', denied:'sd'};
+
+    // Turno effettivo: ricevuto (se la data combacia) oppure Riposo
+    const isOggiRicevuto = swap.orario_ricevuto && swap.data_ricevuta === dateStr;
+    const orarioEffettivo = isOggiRicevuto ? swap.orario_ricevuto : 'Riposo';
+    const tEffettivo = isOggiRicevuto ? classificaOrarioSemplice(swap.orario_ricevuto) : 'r';
+    const labelEffettivo = isOggiRicevuto ? `Ricevuto da ${swap.collega}` : `Hai ceduto questo turno a ${swap.collega}`;
+
     el.innerHTML = `
       <div class="card">
-        <div class="card-label">${dateLabel} · <span style="color:var(--swap)">⇄ Cambio con ${swap.collega}</span></div>
-        <div class="detail-split">
-          <div class="det-col orig">
-            <div class="det-lbl">Piano originale</div>
-            <div class="det-time" style="color:${TYPE_COLOR[t]}">${turno ? turno.orario : '–'}</div>
-            <div class="det-note">${TYPE_LABEL[t]}</div>
-          </div>
-          <div class="det-col swp">
-            <div class="det-lbl">Dopo il cambio</div>
-            <div class="det-time" style="color:var(--swap)">${swap.orario_ceduto}</div>
-            <div class="det-note">Ceduto a ${swap.collega}</div>
-          </div>
+        <div class="card-label">${dateLabel} · <span style="color:var(--swap)">⇄ Cambio turno</span></div>
+        <div class="det-effettivo">
+          <div class="det-lbl">${labelEffettivo}</div>
+          <div class="det-time-big" style="color:${TYPE_COLOR[tEffettivo]}">${orarioEffettivo}</div>
+          <div style="font-size:12px;color:var(--text2);margin-top:2px;">${TYPE_LABEL[tEffettivo]}</div>
         </div>
-        ${swap.orario_ricevuto ? `<div style="margin-top:8px;font-size:11px;color:var(--text3);">Ricevi: ${swap.orario_ricevuto} (${swap.data_ricevuta})</div>` : ''}
-        ${swap.note ? `<div style="margin-top:4px;font-size:11px;color:var(--text3);">📝 ${swap.note}</div>` : ''}
+        <div class="det-originale-riga">
+          <span style="font-size:11px;color:var(--text3);">Turno originale:</span>
+          <span class="det-time-small">${turnoOriginale ? turnoOriginale.orario : '–'}</span>
+        </div>
+        ${swap.note ? `<div style="margin-top:8px;font-size:11px;color:var(--text3);">📝 ${swap.note}</div>` : ''}
         <div style="margin-top:8px;"><span class="swap-status ${statusCls[swap.stato]||'sp'}" style="display:inline-block;">${statusMap[swap.stato]||'IN ATTESA'}</span></div>
       </div>`;
   } else {
+    const t = turnoOriginale.tipo;
     el.innerHTML = `
       <div class="card">
         <div class="card-label">${dateLabel}</div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
           <div>
-            <div style="font-family:'DM Mono',monospace;font-size:20px;color:${TYPE_COLOR[t]};">${turno.orario}</div>
+            <div style="font-family:'DM Mono',monospace;font-size:20px;color:${TYPE_COLOR[t]};">${turnoOriginale.orario}</div>
             <div style="font-size:13px;color:var(--text2);margin-top:2px;">${TYPE_LABEL[t]}</div>
-            ${turno.note ? `<div style="font-size:11px;color:var(--text3);margin-top:2px;">📝 ${turno.note}</div>` : ''}
+            ${turnoOriginale.note ? `<div style="font-size:11px;color:var(--text3);margin-top:2px;">📝 ${turnoOriginale.note}</div>` : ''}
           </div>
           <div style="font-size:11px;color:var(--text3);">Gr. P.T. 11</div>
         </div>
       </div>`;
+  }
+
+  el.innerHTML += blocoNotaPersonale(dateStr);
+  caricaNotaPersonale(dateStr);
+}
+
+// ===== NOTE PERSONALI CALENDARIO =====
+function blocoNotaPersonale(dateStr) {
+  return `
+    <div class="card">
+      <div class="card-label">📝 Nota personale</div>
+      <textarea class="form-input form-textarea" id="notaPersonaleInput" placeholder="es. visita medica, compleanno, promemoria..." style="margin-bottom:8px;"></textarea>
+      <button class="btn btn-secondary" style="margin-bottom:0;" onclick="salvaNotaPersonale('${dateStr}')">💾 Salva nota</button>
+    </div>`;
+}
+
+async function caricaNotaPersonale(dateStr) {
+  const nota = await apiFetch(`/api/note/${dateStr}`);
+  const input = document.getElementById('notaPersonaleInput');
+  if (input) input.value = (nota && nota.testo) ? nota.testo : '';
+}
+
+async function salvaNotaPersonale(dateStr) {
+  const testo = document.getElementById('notaPersonaleInput').value;
+  const res = await apiFetch('/api/note', { method: 'POST', body: JSON.stringify({ data: dateStr, testo }) });
+  if (res && res.ok) {
+    toast(testo.trim() ? '✅ Nota salvata' : 'Nota rimossa');
+    buildCal(); // ricostruisce il calendario per mostrare l'eventuale indicatore nota sulla cella
+  } else {
+    toast('Errore salvataggio nota', true);
   }
 }
 
@@ -927,13 +1162,103 @@ async function uploadFile(input, tipo) {
 }
 
 // ===== SETTINGS =====
+// ===== PAGA ORARIA E RIEPILOGO MENSILE REALE =====
+let updatePayDebounce = null;
+
 function updatePay() {
   const v = parseFloat(document.getElementById('paySlider').value);
   document.getElementById('payVal').textContent = '€' + v.toFixed(1);
-  const m = Math.round(v * 25 * 4 * 0.85);
-  document.getElementById('monthPay').textContent = '€ ' + m.toLocaleString('it-IT');
-  document.getElementById('bigPay').textContent = '€ ' + m.toLocaleString('it-IT');
-  if (document.getElementById('statPaga')) document.getElementById('statPaga').textContent = '€ ' + Math.round(m/4.33);
+
+  // Salva la nuova paga oraria sul server (con debounce per non spammare richieste mentre si trascina lo slider)
+  clearTimeout(updatePayDebounce);
+  updatePayDebounce = setTimeout(async () => {
+    await apiFetch('/api/impostazioni/paga_oraria', { method: 'PUT', body: JSON.stringify({ valore: String(v) }) });
+    caricaRiepilogoPagaCompleto();
+    caricaStatisticheMese();
+  }, 400);
+}
+
+function popolaSelettoreMesi() {
+  const select = document.getElementById('meseStipendioSelect');
+  if (!select) return;
+  select.innerHTML = '';
+  const oggi = new Date();
+  // Da 3 mesi fa a 2 mesi avanti, mese corrente preselezionato
+  for (let offset = -3; offset <= 2; offset++) {
+    const d = new Date(oggi.getFullYear(), oggi.getMonth() + offset, 1);
+    const valore = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const label = `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+    const opt = document.createElement('option');
+    opt.value = valore; opt.textContent = label;
+    if (offset === 0) opt.selected = true;
+    select.appendChild(opt);
+  }
+}
+
+async function caricaRiepilogoPagaCompleto() {
+  const select = document.getElementById('meseStipendioSelect');
+  const mese = select ? select.value : formattaDataLocale(new Date()).slice(0, 7);
+
+  const riepilogo = await apiFetch(`/api/paga-mensile?mese=${mese}`);
+  if (!riepilogo) return;
+
+  document.getElementById('bigPay').textContent = '€ ' + riepilogo.pagaTotale.toFixed(2);
+  document.getElementById('payLabelOre').textContent = `${riepilogo.oreLavorateTotali.toFixed(1)} ore lavorate`;
+  document.getElementById('rOreDiurneFeriali').textContent = riepilogo.oreDiurneFeriali.toFixed(1) + 'h';
+  document.getElementById('rOreNottFeriali').textContent = riepilogo.oreNotturneFeriali.toFixed(1) + 'h';
+  document.getElementById('rOreDiurneFestive').textContent = riepilogo.oreDiurneFestive.toFixed(1) + 'h';
+  document.getElementById('rOreNottFestive').textContent = riepilogo.oreNotturneFestive.toFixed(1) + 'h';
+  document.getElementById('rPagaOrdinaria').textContent = '€ ' + riepilogo.pagaOrdinaria.toFixed(2);
+  document.getElementById('rPagaStraordinari').textContent = '€ ' + riepilogo.pagaStraordinari.toFixed(2);
+
+  caricaListaStraordinari(mese);
+}
+
+async function caricaListaStraordinari(mese) {
+  const lista = await apiFetch(`/api/straordinari?mese=${mese}`);
+  const el = document.getElementById('listaStraordinari');
+  if (!lista || !lista.length) { el.innerHTML = ''; return; }
+
+  el.innerHTML = lista.map(s => `
+    <div style="display:flex;justify-content:space-between;align-items:center;background:var(--surface2);border-radius:8px;padding:8px 10px;margin-bottom:6px;font-size:12px;">
+      <div>
+        <b>${s.data}</b> · ${s.ore}h ${s.notturno ? '🌙' : '☀️'} ${s.giornoRiposo ? '(riposo)' : ''}
+        ${s.note ? `<div style="color:var(--text3);font-size:11px;">${s.note}</div>` : ''}
+      </div>
+      <button onclick="eliminaStraordinario(${s.id})" style="background:none;border:none;color:var(--text3);font-size:16px;cursor:pointer;">🗑</button>
+    </div>`).join('');
+}
+
+async function aggiungiStraordinario() {
+  const data = document.getElementById('str_data').value;
+  const ore = document.getElementById('str_ore').value;
+  const notturno = document.getElementById('str_notturno').checked;
+  const giornoRiposo = document.getElementById('str_riposo').checked;
+  const note = document.getElementById('str_note').value;
+
+  if (!data || !ore) { toast('Inserisci data e ore', true); return; }
+
+  const res = await apiFetch('/api/straordinari', {
+    method: 'POST',
+    body: JSON.stringify({ data, ore: parseFloat(ore), notturno, giornoRiposo, note })
+  });
+
+  if (res && res.ok) {
+    ['str_data', 'str_ore', 'str_note'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('str_notturno').checked = false;
+    document.getElementById('str_riposo').checked = false;
+    toast('✅ Straordinario aggiunto');
+    caricaRiepilogoPagaCompleto();
+    caricaStatisticheMese();
+  } else {
+    toast('Errore salvataggio', true);
+  }
+}
+
+async function eliminaStraordinario(id) {
+  await apiFetch('/api/straordinari/' + id, { method: 'DELETE' });
+  caricaRiepilogoPagaCompleto();
+  caricaStatisticheMese();
 }
 
 async function toggleSetting(togId, key) {
@@ -953,11 +1278,58 @@ function showTab(name) {
   });
   if (name === 'calendario') { buildCal(); document.getElementById('calDayDetail').innerHTML = ''; }
   if (name === 'cambi') { loadSuggerimentiVacanza(); }
+  if (name === 'email') { loadGmailStatus(); }
+  if (name === 'impostazioni') { caricaRiepilogoPagaCompleto(); }
 }
 
-// ===== EMAIL CONNECT =====
+// ===== GMAIL STATUS =====
+async function loadGmailStatus() {
+  const stato = await apiFetch('/api/gmail/stato');
+  if (!stato) return;
+
+  const titolo = document.getElementById('gmailStatusTitle');
+  const sub = document.getElementById('gmailStatusSub');
+  const azioni = document.getElementById('gmailActions');
+
+  if (stato.connesso) {
+    const data = stato.connesso_il ? new Date(stato.connesso_il).toLocaleDateString('it-IT') : '';
+    titolo.textContent = '✅ Gmail collegato';
+    sub.textContent = `Connesso dal ${data}. L'app controlla automaticamente nuove email ogni 30 minuti.`;
+    azioni.innerHTML = `
+      <button class="btn btn-primary" onclick="scansionaGmailOra()">🔄 Scansiona ora</button>
+      <button class="btn btn-secondary" onclick="disconnettiGmail()">Disconnetti</button>`;
+  } else {
+    titolo.textContent = 'Connetti la tua email';
+    sub.textContent = "L'app leggerà automaticamente settimanale e giornaliero ogni giorno.";
+    azioni.innerHTML = `
+      <button class="btn btn-primary" onclick="window.location.href='/auth/google'">📥 Connetti Gmail</button>
+      <button class="btn btn-secondary" onclick="connectEmail('outlook')">📥 Connetti Outlook</button>`;
+  }
+}
+
+async function scansionaGmailOra() {
+  toast('<span class="spinner"></span> Controllo nuove email...');
+  const res = await apiFetch('/api/gmail/scansiona-ora', { method: 'POST' });
+  if (res && res.ok) {
+    toast(`✅ Trovate ${res.email_trovate || 0} nuove email`);
+    loadEmailLog();
+    await loadTurni();
+    buildToday();
+    buildWeekStrip();
+  } else {
+    toast('Errore durante la scansione', true);
+  }
+}
+
+async function disconnettiGmail() {
+  if (!confirm('Disconnettere Gmail? L\'app smetterà di leggere automaticamente le email.')) return;
+  await apiFetch('/api/gmail/disconnetti', { method: 'POST' });
+  loadGmailStatus();
+  toast('Gmail disconnesso');
+}
+
 function connectEmail(type) {
-  alert(`🔗 ${type === 'gmail' ? 'Gmail (Google OAuth)' : 'Outlook (Microsoft OAuth)'}\n\nQuesta funzione aprirà il flusso di autorizzazione. Una volta connessa, l'app leggerà le email ogni giorno, estrarrà i turni e aggiornerà il calendario automaticamente.\n\n(Da implementare con le credenziali OAuth nella sezione .env)`);
+  alert(`🔗 Outlook (Microsoft OAuth)\n\nIl collegamento Outlook non è ancora attivo in questa versione. Per ora puoi usare Gmail, oppure caricare i file manualmente qui sotto.`);
 }
 
 // ===== TOAST =====

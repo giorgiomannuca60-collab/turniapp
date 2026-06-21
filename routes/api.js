@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../db/database');
 const parserTurni = require('../parser-turni');
 const { cercaCollega, trovaGruppoEsatto } = require('../colleghi');
+const calcolaPaga = require('../calcolo-paga');
 
 // ===== TURNI =====
 
@@ -134,8 +135,6 @@ router.post('/controlla-discrepanza', (req, res) => {
   });
 });
 
-module.exports = router;
-
 // ===== COLLEGHI (autocompletamento) =====
 
 // GET /api/colleghi?q=man -> suggerimenti nome + gruppo
@@ -204,4 +203,111 @@ router.get('/suggerimenti-vacanza', (req, res) => {
     proposte_cambio: proposteValidate
   });
 });
+
+// ===== STRAORDINARI =====
+
+// GET /api/straordinari?mese=2025-06 -> straordinari inseriti manualmente, filtrati per mese
+router.get('/straordinari', (req, res) => {
+  const { mese } = req.query;
+  let lista = db.get('straordinari').value() || [];
+  if (mese) lista = lista.filter(s => s.data.startsWith(mese));
+  res.json([...lista].sort((a, b) => a.data.localeCompare(b.data)));
+});
+
+// POST /api/straordinari -> aggiungi ore di straordinario per una data
+// body: { data, ore, notturno: bool, giornoRiposo: bool, note }
+router.post('/straordinari', (req, res) => {
+  const { data, ore, notturno, giornoRiposo, note } = req.body;
+  if (!data || !ore) return res.status(400).json({ error: 'data e ore sono obbligatori' });
+
+  const id = db.get('next_straordinario_id').value() || 1;
+  db.get('straordinari').push({
+    id, data, ore: parseFloat(ore),
+    notturno: !!notturno, giornoRiposo: !!giornoRiposo,
+    note: note || '', created_at: new Date().toISOString()
+  }).write();
+  db.set('next_straordinario_id', id + 1).write();
+  res.json({ ok: true, id });
+});
+
+router.delete('/straordinari/:id', (req, res) => {
+  db.get('straordinari').remove({ id: parseInt(req.params.id) }).write();
+  res.json({ ok: true });
+});
+
+// ===== CALCOLO PAGA MENSILE =====
+
+// GET /api/paga-mensile?mese=2025-06 -> riepilogo completo con maggiorazioni
+router.get('/paga-mensile', (req, res) => {
+  const { mese } = req.query;
+  if (!mese) return res.status(400).json({ error: 'parametro mese (YYYY-MM) obbligatorio' });
+
+  const turniDelMese = db.get('turni').value().filter(t => t.data.startsWith(mese));
+  const straordinariDelMese = (db.get('straordinari').value() || []).filter(s => s.data.startsWith(mese));
+  const pagaOraria = parseFloat(db.get('impostazioni.paga_oraria').value() || 12);
+
+  const riepilogo = calcolaPaga.calcolaRiepilogoMensile(turniDelMese, straordinariDelMese, pagaOraria);
+  res.json({ mese, pagaOraria, ...riepilogo });
+});
+
+// GET /api/ore-notturne-mese?mese=2025-06 -> solo il totale ore notturne (per la home)
+router.get('/ore-notturne-mese', (req, res) => {
+  const { mese } = req.query;
+  const meseTarget = mese || new Date().toISOString().slice(0, 7);
+  const turniDelMese = db.get('turni').value().filter(t => t.data.startsWith(meseTarget));
+
+  let oreNotturneTotali = 0;
+  turniDelMese.forEach(t => {
+    if (t.tipo === 'r') return;
+    const { oreNotturne } = calcolaPaga.scomponiOreNotteGiorno(t.orario);
+    oreNotturneTotali += oreNotturne;
+  });
+
+  res.json({ mese: meseTarget, ore_notturne: oreNotturneTotali });
+});
+
+// ===== NOTE CALENDARIO =====
+
+// GET /api/note?mese=2025-06 -> tutte le note del mese
+router.get('/note', (req, res) => {
+  const { mese } = req.query;
+  let note = db.get('note_calendario').value() || [];
+  if (mese) note = note.filter(n => n.data.startsWith(mese));
+  res.json(note);
+});
+
+// GET /api/note/:data -> nota di un giorno specifico
+router.get('/note/:data', (req, res) => {
+  const nota = (db.get('note_calendario').value() || []).find(n => n.data === req.params.data);
+  res.json(nota || null);
+});
+
+// POST /api/note -> crea o aggiorna la nota di un giorno
+// body: { data, testo }
+router.post('/note', (req, res) => {
+  const { data, testo } = req.body;
+  if (!data) return res.status(400).json({ error: 'data obbligatoria' });
+
+  const exists = (db.get('note_calendario').value() || []).find(n => n.data === data);
+  if (exists) {
+    if (!testo || !testo.trim()) {
+      // testo vuoto = elimina la nota
+      db.get('note_calendario').remove({ data }).write();
+      return res.json({ ok: true, action: 'deleted' });
+    }
+    db.get('note_calendario').find({ data }).assign({ testo, updated_at: new Date().toISOString() }).write();
+    return res.json({ ok: true, action: 'updated' });
+  } else {
+    if (!testo || !testo.trim()) return res.json({ ok: true, action: 'noop' });
+    db.get('note_calendario').push({ data, testo, created_at: new Date().toISOString() }).write();
+    return res.json({ ok: true, action: 'created' });
+  }
+});
+
+router.delete('/note/:data', (req, res) => {
+  db.get('note_calendario').remove({ data: req.params.data }).write();
+  res.json({ ok: true });
+});
+
+module.exports = router;
 
