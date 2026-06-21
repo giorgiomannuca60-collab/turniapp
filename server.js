@@ -55,6 +55,25 @@ function oggiLocale() {
 }
 
 /**
+ * Calcola la data da usare come "riferimento" per indovinare l'anno quando
+ * il titolo del file settimanale non lo specifica (es. "TURNI DAL 22 AL 28
+ * GIUGNO", senza anno). Usa la mediana delle date già presenti nel database,
+ * molto più affidabile della semplice data odierna del server: quest'ultima
+ * può discostarsi di mesi o anni dal periodo che l'utente sta effettivamente
+ * caricando (bug storico riscontrato: un file di giugno 2025 veniva
+ * interpretato come giugno 2026 solo perché "oggi" sul server era già il
+ * 2026, anche se tutti gli altri turni nel database erano del 2025).
+ */
+function calcolaDataRiferimentoAnno(db) {
+  const tuttiTurni = db.get('turni').value();
+  if (tuttiTurni && tuttiTurni.length > 0) {
+    const dateOrdinate = tuttiTurni.map(t => t.data).sort();
+    return dateOrdinate[Math.floor(dateOrdinate.length / 2)]; // mediana
+  }
+  return oggiLocale(); // database vuoto: nessun altro riferimento disponibile
+}
+
+/**
  * Elabora il PIANO SETTIMANALE (Excel o PDF, stesso risultato): calcola la
  * rotazione su tutte le settimane future E passate (fino a DATA_MINIMA_PASSATO)
  * e salva/aggiorna i turni nel database. Funzione condivisa sia dall'upload
@@ -141,13 +160,14 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     if (tipo === 'settimanale') {
       // ===== PARSING REALE: Excel oppure PDF, stesso flusso di calcolo dopo =====
       let griglia, dataLunediRilevata;
+      const dataRiferimentoAnno = calcolaDataRiferimentoAnno(db);
 
       if (estensione === '.pdf') {
-        const risultato = await parserPdf.leggiGrigliaSettimanalePdf(filePath);
+        const risultato = await parserPdf.leggiGrigliaSettimanalePdf(filePath, dataRiferimentoAnno);
         griglia = risultato.griglia;
         dataLunediRilevata = risultato.dataLunediRilevata;
       } else {
-        const risultato = parserTurni.leggiGrigliaSettimanale(filePath);
+        const risultato = parserTurni.leggiGrigliaSettimanale(filePath, dataRiferimentoAnno);
         griglia = risultato.griglia;
         dataLunediRilevata = risultato.dataLunediRilevata;
       }
@@ -157,6 +177,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       );
 
       const estratto = `Calcolati ${turniCalcolati.length} turni totali dal Gruppo ${GRUPPO_GIORGIO}: ${turniPassati.length} passati (fino a ${DATA_MINIMA_PASSATO}) + ${turniFuturi.length} futuri, settimana di riferimento ${dataLunedi} (file ${estensione}).`;
+
 
       db.get('email_log').push({
         tipo, filename,
@@ -303,11 +324,12 @@ async function scansionaEmailTurni() {
         if (tipoIndovinato === 'settimanale' || (tipoIndovinato === 'incerto' && allegato.estensione !== '.pdf')) {
           // Excel è quasi sempre il settimanale; i PDF "incerti" li trattiamo come giornaliero di default
           let griglia, dataLunediRilevata;
+          const dataRiferimentoAnno = calcolaDataRiferimentoAnno(db);
           if (allegato.estensione === '.pdf') {
-            const r = await parserPdf.leggiGrigliaSettimanalePdf(allegato.percorsoLocale);
+            const r = await parserPdf.leggiGrigliaSettimanalePdf(allegato.percorsoLocale, dataRiferimentoAnno);
             griglia = r.griglia; dataLunediRilevata = r.dataLunediRilevata;
           } else {
-            const r = parserTurni.leggiGrigliaSettimanale(allegato.percorsoLocale);
+            const r = parserTurni.leggiGrigliaSettimanale(allegato.percorsoLocale, dataRiferimentoAnno);
             griglia = r.griglia; dataLunediRilevata = r.dataLunediRilevata;
           }
           const { dataLunedi, turniCalcolati, discrepanze } = elaboraSettimanale(griglia, dataLunediRilevata, null, db);

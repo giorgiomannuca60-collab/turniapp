@@ -31,7 +31,7 @@ async function estraiTestoPdf(filePath) {
  * Stessa logica di rilevamento data usata per l'Excel ("TURNI DAL 22 AL 28 GIUGNO"),
  * applicata al testo grezzo estratto dal PDF.
  */
-function estraiDataLunediDaTestoPdf(testo) {
+function estraiDataLunediDaTestoPdf(testo, dataRiferimento) {
   const meseRegex = new RegExp(`\\b(${Object.keys(MESI_IT).join('|')})\\b`, 'i');
   const matchGiorni = testo.match(/DAL\s+(\d{1,2})\s+AL\s+(\d{1,2})/i);
   const matchMese = testo.match(meseRegex);
@@ -44,12 +44,16 @@ function estraiDataLunediDaTestoPdf(testo) {
   let anno = matchAnno ? parseInt(matchAnno[1]) : null;
 
   if (anno === null) {
-    const oggi = new Date();
-    const candidati = [oggi.getFullYear() - 1, oggi.getFullYear(), oggi.getFullYear() + 1];
+    // Anno non scritto: scegli quello più vicino al riferimento passato dal
+    // chiamante (es. mediana delle date già nel database), non alla data
+    // odierna del server, che può discostarsi di mesi/anni dal periodo
+    // effettivamente caricato dall'utente.
+    const riferimento = dataRiferimento ? new Date(dataRiferimento + 'T00:00:00') : new Date();
+    const candidati = [riferimento.getFullYear() - 1, riferimento.getFullYear(), riferimento.getFullYear() + 1];
     let migliore = null, distanzaMin = Infinity;
     candidati.forEach(annoTest => {
       const d = new Date(annoTest, mese, giornoInizio);
-      const dist = Math.abs(d - oggi);
+      const dist = Math.abs(d - riferimento);
       if (dist < distanzaMin) { distanzaMin = dist; migliore = annoTest; }
     });
     anno = migliore;
@@ -68,9 +72,9 @@ function estraiDataLunediDaTestoPdf(testo) {
  * della settimana, separati da spazi, nello stesso ordine Lun→Dom.
  * Pattern atteso per riga: "GRUPPO 11   RIPOSO  18/23  12/17  12/17  10/15  11/16  RIPOSO"
  */
-async function leggiGrigliaSettimanalePdf(filePath) {
+async function leggiGrigliaSettimanalePdf(filePath, dataRiferimento) {
   const testo = await estraiTestoPdf(filePath);
-  const dataLunediRilevata = estraiDataLunediDaTestoPdf(testo);
+  const dataLunediRilevata = estraiDataLunediDaTestoPdf(testo, dataRiferimento);
 
   const griglia = {};
 

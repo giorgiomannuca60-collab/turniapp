@@ -76,7 +76,21 @@ const MESI_IT = {
  * l'anno (corrente o successivo) che fa cadere quel giorno/mese di lunedì
  * più vicino alla data odierna — evita di finire nel passato per errore.
  */
-function estraiDataLunediDaTitolo(rows) {
+/**
+ * Riconosce dal titolo del foglio (es. "TURNI DAL 22 AL 28 GIUGNO") il lunedì
+ * della settimana rappresentata. Se l'anno non è scritto nel titolo (caso
+ * comune: il file del datore di lavoro non lo include mai), lo deduce.
+ *
+ * dataRiferimento (opzionale): una data ISO YYYY-MM-DD usata come "centro"
+ * per scegliere l'anno più plausibile, al posto della data odierna del
+ * server. Indispensabile perché la data odierna del server può discostarsi
+ * di mesi/anni dal periodo che l'utente sta effettivamente caricando (es.
+ * sta inserendo turni del 2025 anche se oggi per il calendario è il 2026):
+ * usare sempre "oggi" come riferimento porterebbe a scegliere l'anno
+ * sbagliato in questi casi. Il chiamante dovrebbe passare l'ultima data
+ * nota nel database, se disponibile.
+ */
+function estraiDataLunediDaTitolo(rows, dataRiferimento) {
   const meseRegex = new RegExp(`\\b(${Object.keys(MESI_IT).join('|')})\\b`, 'i');
 
   for (let i = 0; i < Math.min(rows.length, 5); i++) {
@@ -92,13 +106,16 @@ function estraiDataLunediDaTitolo(rows) {
 
       if (anno === null) {
         // Anno non scritto nel file: scegli quello (corrente o adiacente)
-        // che porta la data più vicina a oggi, per evitare di sbagliare di un anno intero
-        const oggi = new Date();
-        const candidati = [oggi.getFullYear() - 1, oggi.getFullYear(), oggi.getFullYear() + 1];
+        // che porta la data più vicina al punto di riferimento, per evitare
+        // di sbagliare di un anno intero. Il riferimento è la data passata
+        // dal chiamante (es. ultimo turno noto nel database) se disponibile,
+        // altrimenti la data odierna del server come ultima spiaggia.
+        const riferimento = dataRiferimento ? new Date(dataRiferimento + 'T00:00:00') : new Date();
+        const candidati = [riferimento.getFullYear() - 1, riferimento.getFullYear(), riferimento.getFullYear() + 1];
         let migliore = null, distanzaMin = Infinity;
         candidati.forEach(annoTest => {
           const d = new Date(annoTest, mese, giornoInizio);
-          const dist = Math.abs(d - oggi);
+          const dist = Math.abs(d - riferimento);
           if (dist < distanzaMin) { distanzaMin = dist; migliore = annoTest; }
         });
         anno = migliore;
@@ -117,7 +134,7 @@ function estraiDataLunediDaTitolo(rows) {
  * - Riga 6 (index 5): intestazioni giorni
  * - Righe 7-21 (index 6-20): un gruppo per riga, colonna A nome gruppo, colonne C-I i 7 giorni
  */
-function leggiGrigliaSettimanale(filePath) {
+function leggiGrigliaSettimanale(filePath, dataRiferimento) {
   const wb = XLSX.readFile(filePath);
   const sheetName = wb.SheetNames[0];
   const sheet = wb.Sheets[sheetName];
@@ -147,23 +164,41 @@ function leggiGrigliaSettimanale(filePath) {
     dateSettimana.push(numMatch ? parseInt(numMatch[1]) : null);
   }
 
-  // Scansiona le righe successive cercando "GRUPPO N"
+  // Scansiona le righe successive cercando "GRUPPO N" seguito da turni veri.
+  // ATTENZIONE: più sotto nel foglio c'è anche una sezione con l'elenco nominativo
+  // dei dipendenti per gruppo, che riusa "GRUPPO N" come intestazione di colonna
+  // (es. riga con "GRUPPO 11", "GRUPPO 12", "GRUPPO 13"... tutte sulla stessa riga).
+  // Quella sezione va ignorata, altrimenti sovrascrive per errore i turni veri
+  // già letti per quel numero di gruppo. La distinguiamo contando quante volte
+  // "GRUPPO" compare sulla riga: se più di una, è la riga di intestazione nomi,
+  // non una riga turni (che ha sempre un solo "GRUPPO N" in colonna A).
   for (let r = headerRowIdx + 1; r < rows.length; r++) {
     const row = rows[r];
     const label = String(row[0] || '').trim().toUpperCase();
     const match = label.match(/GRUPPO\s*(\d{1,2})/);
     if (!match) continue; // non è una riga di gruppo (es. riga vuota o elenco nomi)
 
+    const occorrenzeGruppoNellaRiga = (row.join(' ').toUpperCase().match(/GRUPPO/g) || []).length;
+    if (occorrenzeGruppoNellaRiga > 1) break; // raggiunta la sezione elenco nomi: ferma la scansione
+
     const numGruppo = parseInt(match[1]);
     const turniSettimana = [];
     for (let c = dayColStart; c < dayColStart + 7; c++) {
       turniSettimana.push(classificaTurno(row[c]));
     }
+
+    // Validazione extra: una riga turni vera ha sempre almeno un valore
+    // riconoscibile (Riposo o orario HH/HH) tra i 7 giorni. Se sono tutti
+    // null/non riconosciuti, non è una riga turni valida: la saltiamo invece
+    // di sovrascrivere dati eventualmente già corretti per quel gruppo.
+    const haAlmenoUnTurnoValido = turniSettimana.some(t => t !== null);
+    if (!haAlmenoUnTurnoValido) continue;
+
     griglia[numGruppo] = turniSettimana;
   }
 
   // Estrae automaticamente la data del lunedì dal titolo del foglio (es. "TURNI DAL 22 AL 28 GIUGNO")
-  const dataLunediRilevata = estraiDataLunediDaTitolo(rows.slice(0, headerRowIdx + 1));
+  const dataLunediRilevata = estraiDataLunediDaTitolo(rows.slice(0, headerRowIdx + 1), dataRiferimento);
 
   return { griglia, dateSettimana, headerRowIdx, dataLunediRilevata };
 }
