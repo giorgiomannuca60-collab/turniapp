@@ -13,10 +13,13 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Configurazione fissa: il gruppo di Giorgio e quante settimane calcolare in avanti
-const GRUPPO_GIORGIO = 11;
-const COGNOME_GIORGIO = 'MANNUCA';
-const SETTIMANE_DA_CALCOLARE = 20; // ~ fino a ottobre
-const DATA_MINIMA_PASSATO = '2025-04-01'; // fin dove calcolare i turni passati a ritroso
+const GRUPPO_GIORGIO = parseInt(process.env.GRUPPO || '11');
+const COGNOME_GIORGIO = process.env.COGNOME || 'MANNUCA';
+const SETTIMANE_DA_CALCOLARE = parseInt(process.env.SETTIMANE_AVANTI || '20');
+const DATA_MINIMA_PASSATO = process.env.DATA_MINIMA_PASSATO || '2026-01-01'; // 2026: anno corrente
+// Anno di riferimento usato per disambiguare i file che non scrivono l'anno nel titolo.
+// Sovrascrivibile via variabile d'ambiente ANNO_RIFERIMENTO su Railway.
+const ANNO_RIFERIMENTO = parseInt(process.env.ANNO_RIFERIMENTO || '2026');
 
 // Middleware
 app.use(cors());
@@ -57,20 +60,16 @@ function oggiLocale() {
 /**
  * Calcola la data da usare come "riferimento" per indovinare l'anno quando
  * il titolo del file settimanale non lo specifica (es. "TURNI DAL 22 AL 28
- * GIUGNO", senza anno). Usa la mediana delle date già presenti nel database,
- * molto più affidabile della semplice data odierna del server: quest'ultima
- * può discostarsi di mesi o anni dal periodo che l'utente sta effettivamente
- * caricando (bug storico riscontrato: un file di giugno 2025 veniva
- * interpretato come giugno 2026 solo perché "oggi" sul server era già il
- * 2026, anche se tutti gli altri turni nel database erano del 2025).
+ * GIUGNO", senza anno). Usa ANNO_RIFERIMENTO come ancora fissa (configurabile
+ * via variabile d'ambiente su Railway) invece della mediana del database, che
+ * può puntare all'anno sbagliato se ci sono vecchi dati storici — esattamente
+ * il bug che causava l'interpretazione di file del 2026 come se fossero 2025.
  */
 function calcolaDataRiferimentoAnno(db) {
-  const tuttiTurni = db.get('turni').value();
-  if (tuttiTurni && tuttiTurni.length > 0) {
-    const dateOrdinate = tuttiTurni.map(t => t.data).sort();
-    return dateOrdinate[Math.floor(dateOrdinate.length / 2)]; // mediana
-  }
-  return oggiLocale(); // database vuoto: nessun altro riferimento disponibile
+  // Usa ANNO_RIFERIMENTO come ancora: produce una data al 1° luglio dell'anno
+  // configurato, che sarà sempre la scelta più vicina per qualsiasi settimana
+  // di quell'anno, indipendentemente da cosa c'è nel database.
+  return `${ANNO_RIFERIMENTO}-07-01`;
 }
 
 /**
