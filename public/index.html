@@ -352,6 +352,63 @@
             <option value="denied">❌ Rifiutato</option>
           </select>
         </div>
+
+        <!-- Toggle cambio a 3 -->
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);margin-bottom:12px;">
+          <div class="toggle" id="togTre" onclick="toggleCambioTre()"></div>
+          <div>
+            <div style="font-size:13px;font-weight:600;">Cambio a 3 persone</div>
+            <div style="font-size:11px;color:var(--text3);">Giorgio → Collega B → Collega C → Giorgio</div>
+          </div>
+        </div>
+
+        <!-- Sezione aggiuntiva cambio a 3 (nascosta di default) -->
+        <div id="cambioTreSection" style="display:none;">
+          <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px;margin-bottom:12px;border-left:3px solid var(--accent2);">
+            <div style="font-size:11px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px;">Passaggio intermedio (B → C)</div>
+            <div class="form-group" style="position:relative;margin-bottom:10px;">
+              <label class="form-label">Collega B (quello che riceve da te)</label>
+              <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">Già inserito sopra come "Collega"</div>
+            </div>
+            <div class="form-group" style="position:relative;">
+              <label class="form-label">Collega C (quello che cede il turno a te)</label>
+              <input type="text" class="form-input" id="sw_colleague_c" placeholder="Scrivi il nome..." autocomplete="off" oninput="cercaColleghiC(this.value)" onfocus="cercaColleghiC(this.value)">
+              <div id="colleagueSuggestionsC" style="position:absolute;top:100%;left:0;right:0;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);margin-top:4px;max-height:200px;overflow-y:auto;z-index:20;display:none;"></div>
+              <div id="colleagueGroupBadgeC" style="margin-top:6px;display:none;">
+                <span class="tag tag-blue" id="colleagueGroupTextC">Gruppo –</span>
+              </div>
+            </div>
+            <div class="form-row" style="margin-top:10px;">
+              <div class="form-group">
+                <label class="form-label">Data ceduta da B a C</label>
+                <input type="date" class="form-input" id="sw_date_b">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Orario ceduto da B a C</label>
+                <select class="form-input" id="sw_time_b">
+                  <option value="">Scegli...</option>
+                  <option value="Riposo">Riposo</option>
+                  <option value="05:00-10:00">05:00 – 10:00</option>
+                  <option value="07:00-12:00">07:00 – 12:00</option>
+                  <option value="08:00-13:00">08:00 – 13:00</option>
+                  <option value="09:00-14:00">09:00 – 14:00</option>
+                  <option value="10:00-15:00">10:00 – 15:00</option>
+                  <option value="11:00-16:00">11:00 – 16:00</option>
+                  <option value="12:00-17:00">12:00 – 17:00</option>
+                  <option value="13:00-18:00">13:00 – 18:00</option>
+                  <option value="14:00-19:00">14:00 – 19:00</option>
+                  <option value="15:00-20:00">15:00 – 20:00</option>
+                  <option value="16:00-21:00">16:00 – 21:00</option>
+                  <option value="17:00-22:00">17:00 – 22:00</option>
+                  <option value="18:00-23:00">18:00 – 23:00</option>
+                  <option value="19:00-24:00">19:00 – 24:00</option>
+                  <option value="20:00-01:00">20:00 – 01:00 (notte)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="form-group">
           <label class="form-label">Note</label>
           <textarea class="form-input form-textarea" id="sw_notes" placeholder="Motivo, accordi..."></textarea>
@@ -974,6 +1031,7 @@ function checkRiposo11h() {
 
 // ===== SAVE SWAP =====
 async function saveSwap() {
+  const isTre = document.getElementById('togTre').classList.contains('on');
   const body = {
     data_ceduta: document.getElementById('sw_mydate').value,
     orario_ceduto: document.getElementById('sw_mytime').value,
@@ -983,27 +1041,126 @@ async function saveSwap() {
     orario_ricevuto: document.getElementById('sw_theirtime').value,
     stato: document.getElementById('sw_status').value,
     note: document.getElementById('sw_notes').value,
+    tipo: isTre ? 'tre' : 'due',
   };
+
+  if (isTre) {
+    body.collega_c = document.getElementById('sw_colleague_c').value;
+    body.gruppo_collega_c = selectedColleagueCGroup;
+    body.data_ceduta_b = document.getElementById('sw_date_b').value;
+    body.orario_ceduto_b = document.getElementById('sw_time_b').value;
+  }
+
   if (!body.data_ceduta || !body.orario_ceduto || !body.collega) {
     toast('Compila data, orario ceduto e collega', true); return;
   }
+  if (isTre && !body.collega_c) {
+    toast('Cambio a 3: inserisci anche il Collega C', true); return;
+  }
+
   const res = await apiFetch('/api/cambi', { method:'POST', body: JSON.stringify(body) });
   if (res && res.ok) {
-    ['sw_mydate','sw_mytime','sw_colleague','sw_theirdate','sw_theirtime','sw_notes'].forEach(id => document.getElementById(id).value = '');
+    ['sw_mydate','sw_mytime','sw_colleague','sw_theirdate','sw_theirtime','sw_notes',
+     'sw_colleague_c','sw_date_b','sw_time_b'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.value = '';
+    });
     document.getElementById('sw_status').value = 'pending';
     document.getElementById('colleagueGroupBadge').style.display = 'none';
+    document.getElementById('colleagueGroupBadgeC').style.display = 'none';
     document.getElementById('riposo11hWarning').style.display = 'none';
+    document.getElementById('togTre').classList.remove('on');
+    document.getElementById('cambioTreSection').style.display = 'none';
     selectedColleagueGroup = null;
+    selectedColleagueCGroup = null;
     await loadCambi();
     buildWeekStrip();
-    buildToday(); // ricalcola le statistiche in home, incluse le ore notturne
+    await refreshNotturni(); // aggiorna ore notturne ovunque
     toast('✅ Cambio salvato! Visibile nel calendario.');
   } else {
     toast('Errore salvataggio', true);
   }
 }
 
-// ===== SUGGERIMENTI VACANZA =====
+
+let selectedColleagueCGroup = null;
+
+function toggleCambioTre() {
+  const tog = document.getElementById('togTre');
+  const section = document.getElementById('cambioTreSection');
+  tog.classList.toggle('on');
+  section.style.display = tog.classList.contains('on') ? 'block' : 'none';
+}
+
+function cercaColleghiC(query) {
+  const box = document.getElementById('sw_colleague_c');
+  const dropdown = document.getElementById('colleagueSuggestionsC');
+  if (!query || query.length < 2) { dropdown.style.display = 'none'; return; }
+
+  apiFetch(`/api/colleghi/cerca?q=${encodeURIComponent(query)}`).then(risultati => {
+    if (!risultati || !risultati.length) { dropdown.style.display = 'none'; return; }
+    dropdown.innerHTML = risultati.map(c => `
+      <div onclick="selezionaCollegaC('${c.nome}', ${c.gruppo})"
+           style="padding:10px 12px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px;">
+        ${c.nome} <span class="tag tag-blue" style="margin-left:6px;">Gr. ${c.gruppo}</span>
+      </div>`).join('');
+    dropdown.style.display = 'block';
+  });
+}
+
+function selezionaCollegaC(nome, gruppo) {
+  document.getElementById('sw_colleague_c').value = nome;
+  document.getElementById('colleagueSuggestionsC').style.display = 'none';
+  selectedColleagueCGroup = gruppo;
+  const badge = document.getElementById('colleagueGroupBadgeC');
+  badge.style.display = 'block';
+  document.getElementById('colleagueGroupTextC').textContent = `Gruppo ${gruppo}`;
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('#sw_colleague_c') && !e.target.closest('#colleagueSuggestionsC')) {
+    const d = document.getElementById('colleagueSuggestionsC');
+    if (d) d.style.display = 'none';
+  }
+});
+
+
+/**
+ * Aggiorna in modo affidabile tutte le voci legate ai notturni:
+ * 1. Card "Questo mese" in home (ore notturne maturate nel mese corrente,
+ *    tenendo conto dei cambi turno appena salvati/eliminati)
+ * 2. Riepilogo stipendio in Impostazioni (usa il mese precedente come
+ *    competenza, ma i cambi del mese corrente sono già inclusi)
+ * Chiamata esplicitamente dopo ogni salvataggio/eliminazione di un cambio,
+ * invece di delegare a buildToday() che a volte non aspettava il server.
+ */
+async function refreshNotturni() {
+  const meseCorrente = formattaDataLocale(new Date()).slice(0, 7);
+
+  // Chiamate parallele: ore notturne del mese corrente (per home)
+  // e riepilogo stipendio del mese corrente come competenza diretta
+  const [oreNotturne, riepilogoPaga] = await Promise.all([
+    apiFetch(`/api/ore-notturne-mese?mese=${meseCorrente}`),
+    apiFetch(`/api/paga-mensile?mese=${meseCorrente}&mese_competenza_diretto=1`)
+  ]);
+
+  // Aggiorna home
+  if (oreNotturne) {
+    const el = document.getElementById('statOreNotturne');
+    if (el) el.textContent = oreNotturne.ore_notturne.toFixed(1) + 'h';
+  }
+  if (riepilogoPaga) {
+    const elOre = document.getElementById('statOreMese');
+    const elPaga = document.getElementById('statPaga');
+    if (elOre) elOre.textContent = riepilogoPaga.oreLavorateTotali.toFixed(1) + 'h';
+    if (elPaga) elPaga.textContent = '€ ' + riepilogoPaga.pagaTotale.toFixed(2);
+  }
+
+  // Se la tab Impostazioni è aperta, aggiorna anche il riepilogo dettagliato
+  if (!document.getElementById('tab-impostazioni').classList.contains('hidden')) {
+    caricaRiepilogoPagaCompleto();
+  }
+}
+
 async function loadSuggerimentiVacanza() {
   const el = document.getElementById('suggerimentiVacanza');
   el.innerHTML = '<div style="text-align:center;color:var(--text3);padding:20px;"><span class="spinner" style="border-top-color:var(--text2);"></span>Analisi calendario...</div>';
@@ -1079,19 +1236,34 @@ function renderSwapList() {
   el.innerHTML = allCambi.map(c => {
     const d = new Date(c.data_ceduta + 'T00:00:00');
     const label = `${DAYS_S[d.getDay()]} ${d.getDate()} ${MONTHS_S[d.getMonth()]}`;
+    const isTre = c.tipo === 'tre';
+
+    // Dettagli cambio: diversi per cambio a 2 e a 3
+    let dettagli = `<b>Cedo:</b> ${c.orario_ceduto} <span class="swap-arrow">⇄</span> <b>${c.collega}</b>${c.gruppo_collega ? ` <span class="tag tag-blue" style="margin-left:2px;">Gr.${c.gruppo_collega}</span>` : ''}`;
+
+    if (isTre) {
+      // Mostra la catena completa A→B→C→A
+      dettagli += `<br><span style="color:var(--accent2);font-size:11px;margin-left:4px;">↓ poi</span>`;
+      dettagli += `<br><b>${c.collega}</b> cede ${c.orario_ceduto_b || '–'} il ${c.data_ceduta_b || '–'} <span class="swap-arrow">⇄</span> <b>${c.collega_c || '–'}</b>${c.gruppo_collega_c ? ` <span class="tag tag-blue" style="margin-left:2px;">Gr.${c.gruppo_collega_c}</span>` : ''}`;
+      dettagli += `<br><span style="color:var(--accent2);font-size:11px;margin-left:4px;">↓ poi</span>`;
+      dettagli += `<br><b>Ricevo da ${c.collega_c || '–'}:</b> ${c.data_ricevuta || '–'} · ${c.orario_ricevuto || '–'}`;
+    } else {
+      if (c.data_ricevuta) dettagli += `<br><b>Ricevo:</b> ${c.data_ricevuta} · ${c.orario_ricevuto}`;
+    }
+
     return `
       <div class="swap-item" style="border-left-color:${borderColor[c.stato]||'var(--yellow)'};">
         <div class="swap-hdr">
-          <div class="swap-lbl">📅 ${label}</div>
+          <div class="swap-lbl">
+            📅 ${label}
+            ${isTre ? '<span class="tag" style="background:#1a1040;color:var(--accent2);margin-left:6px;font-size:9px;">⛓ 3 PERSONE</span>' : ''}
+          </div>
           <div style="display:flex;align-items:center;gap:8px;">
             <div class="swap-status ${statusCls[c.stato]||'sp'}">${statusMap[c.stato]||'IN ATTESA'}</div>
             <button class="swap-del" onclick="deleteSwap(${c.id})">🗑</button>
           </div>
         </div>
-        <div class="swap-details">
-          <b>Cedo:</b> ${c.orario_ceduto} <span class="swap-arrow">⇄</span> <b>${c.collega}</b>${c.gruppo_collega ? ` <span class="tag tag-blue" style="margin-left:2px;">Gr.${c.gruppo_collega}</span>` : ''}
-          ${c.data_ricevuta ? `<br><b>Ricevo:</b> ${c.data_ricevuta} · ${c.orario_ricevuto}` : ''}
-        </div>
+        <div class="swap-details">${dettagli}</div>
         ${c.note ? `<div class="swap-notes">📝 ${c.note}</div>` : ''}
       </div>`;
   }).join('');
@@ -1102,7 +1274,7 @@ async function deleteSwap(id) {
   await apiFetch('/api/cambi/' + id, { method:'DELETE' });
   await loadCambi();
   buildWeekStrip();
-  buildToday(); // ricalcola le ore notturne in home
+  await refreshNotturni();
   toast('Cambio eliminato');
 }
 

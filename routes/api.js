@@ -49,13 +49,22 @@ router.get('/cambi', (req, res) => {
 });
 
 router.post('/cambi', (req, res) => {
-  const { data_ceduta, orario_ceduto, collega, gruppo_collega, data_ricevuta, orario_ricevuto, stato, note } = req.body;
+  const {
+    data_ceduta, orario_ceduto, collega, gruppo_collega,
+    data_ricevuta, orario_ricevuto, stato, note,
+    tipo,
+    // Campi aggiuntivi per cambio a 3 persone
+    collega_c, gruppo_collega_c, data_ceduta_b, orario_ceduto_b
+  } = req.body;
+
   if (!data_ceduta || !orario_ceduto || !collega) {
     return res.status(400).json({ error: 'data_ceduta, orario_ceduto e collega sono obbligatori' });
   }
+
   const id = db.get('next_cambio_id').value();
-  db.get('cambi').push({
+  const record = {
     id,
+    tipo: tipo || 'due',  // 'due' = cambio normale, 'tre' = catena a 3
     data_ceduta,
     orario_ceduto,
     collega,
@@ -65,7 +74,17 @@ router.post('/cambi', (req, res) => {
     stato: stato || 'pending',
     note: note || '',
     created_at: new Date().toISOString()
-  }).write();
+  };
+
+  // Dati aggiuntivi solo per cambio a 3
+  if (tipo === 'tre') {
+    record.collega_c = collega_c || '';
+    record.gruppo_collega_c = gruppo_collega_c || null;
+    record.data_ceduta_b = data_ceduta_b || '';   // giorno in cui B cede a C
+    record.orario_ceduto_b = orario_ceduto_b || ''; // orario ceduto da B a C
+  }
+
+  db.get('cambi').push(record).write();
   db.set('next_cambio_id', id + 1).write();
   res.json({ ok: true, id });
 });
@@ -235,29 +254,109 @@ router.delete('/straordinari/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-// ===== CALCOLO PAGA MENSILE =====
+// ===== CALCOLO PAGA MENSILE (consapevole dei cambi turno) =====
 
-// GET /api/paga-mensile?mese=2025-06 -> riepilogo completo con maggiorazioni
+/**
+ * Calcola i turni EFFETTIVAMENTE lavorati in un dato mese, tenendo conto
+ * dei cambi turno: se un giorno ha un cambio, il turno da considerare ai
+ * fini della paga non è più quello originale (calcolato dalla rotazione),
+ * ma quello realmente lavorato — Riposo se Giorgio ha solo CEDUTO il turno
+ * quel giorno, oppure l'orario RICEVUTO se quel giorno coincide con la data
+ * di un turno ricevuto da un collega.
+ *
+ * Questo garantisce che le ore notturne/festive ricevute tramite scambio
+ * vengano conteggiate correttamente nello stipendio, e quelle cedute no.
+ */
+function calcolaTurniEffettiviMese(mese) {
+  const turniMese = db.get('turni').value().filter(t => t.data.startsWith(mese));
+  const tuttiCambi = db.get('cambi').value() || [];
+
+  // Mappa rapida: data -> cambio, sia per il giorno ceduto che per quello ricevuto
+  const cambiPerDataCeduta = {};
+  const cambiPerDataRicevuta = {};
+  tuttiCambi.forEach(c => {
+    cambiPerDataCeduta[c.data_ceduta] = c;
+    if (c.data_ricevuta) cambiPerDataRicevuta[c.data_ricevuta] = c;
+  });
+
+  return turniMese.map(t => {
+    const cambioCeduto = cambiPerDataCeduta[t.data];
+    if (cambioCeduto) {
+      // Quel giorno Giorgio ha ceduto il turno originale: ai fini paga conta come Riposo,
+      // A MENO CHE quello stesso giorno non coincida ANCHE con una data di ricezione
+      // (caso raro ma possibile: scambio nello stesso giorno).
+      if (cambioCeduto.data_ricevuta === t.data && cambioCeduto.orario_ricevuto) {
+        return { ...t, orario: cambioCeduto.orario_ricevuto, tipo: classificaOrarioPerTipo(cambioCeduto.orario_ricevuto), fonte: 'cambio_ricevuto' };
+      }
+      return { ...t, orario: 'Riposo', tipo: 'r', fonte: 'cambio_ceduto' };
+    }
+    return t;
+  }).concat(
+    // Aggiunge eventuali giorni RICEVUTI che cadono in questo mese ma che
+    // NON corrispondono a una data già presente in turniMese (es. ricevuto
+    // un turno in un giorno che nella griglia originale non era nemmeno
+    // calcolato, scenario limite ma da coprire per correttezza).
+    tuttiCambi
+      .filter(c => c.data_ricevuta && c.data_ricevuta.startsWith(mese) && c.orario_ricevuto)
+      .filter(c => !turniMese.some(t => t.data === c.data_ricevuta))
+      .map(c => ({
+        data: c.data_ricevuta,
+        orario: c.orario_ricevuto,
+        tipo: classificaOrarioPerTipo(c.orario_ricevuto),
+        fonte: 'cambio_ricevuto'
+      }))
+  );
+}
+
+// Classifica rapidamente un orario "HH:MM-HH:MM" nel tipo turno (m/p/s/n/r),
+// usata per i turni ricevuti via cambio che non hanno già un tipo assegnato.
+function classificaOrarioPerTipo(orarioStr) {
+  if (!orarioStr || orarioStr.toLowerCase().includes('riposo')) return 'r';
+  const match = orarioStr.match(/(\d{1,2}):/);
+  if (!match) return 'r';
+  const ora = parseInt(match[1]);
+  if (ora >= 5 && ora < 11) return 'm';
+  if (ora >= 11 && ora < 16) return 'p';
+  if (ora >= 16 && ora < 20) return 's';
+  return 'n';
+}
+
+// GET /api/paga-mensile?mese=2026-05 -> riepilogo completo, mese DI PAGAMENTO
+// (calcola automaticamente il mese di competenza precedente, secondo lo
+// sfasamento contrattuale confermato da Giorgio: lo stipendio di un mese
+// paga le ore del mese precedente), tenendo conto dei cambi turno.
 router.get('/paga-mensile', (req, res) => {
-  const { mese } = req.query;
+  const { mese, mese_competenza_diretto } = req.query;
   if (!mese) return res.status(400).json({ error: 'parametro mese (YYYY-MM) obbligatorio' });
 
-  const turniDelMese = db.get('turni').value().filter(t => t.data.startsWith(mese));
-  const straordinariDelMese = (db.get('straordinari').value() || []).filter(s => s.data.startsWith(mese));
+  // Se il chiamante passa esplicitamente mese_competenza_diretto=1, il
+  // parametro "mese" è già il mese di competenza (utile per la card "Questo
+  // mese" in home, che mostra le ore maturate ora, non lo stipendio futuro).
+  const meseCompetenza = mese_competenza_diretto ? mese : calcolaPaga.calcolaMeseCompetenza(mese);
+
+  const turniEffettivi = calcolaTurniEffettiviMese(meseCompetenza);
+  const straordinariDelMese = (db.get('straordinari').value() || []).filter(s => s.data.startsWith(meseCompetenza));
   const pagaOraria = parseFloat(db.get('impostazioni.paga_oraria').value() || 12);
 
-  const riepilogo = calcolaPaga.calcolaRiepilogoMensile(turniDelMese, straordinariDelMese, pagaOraria);
-  res.json({ mese, pagaOraria, ...riepilogo });
+  const riepilogo = calcolaPaga.calcolaRiepilogoMensile(turniEffettivi, straordinariDelMese, pagaOraria);
+  res.json({
+    mese_pagamento: mese,
+    mese_competenza: meseCompetenza,
+    pagaOraria,
+    ...riepilogo
+  });
 });
 
-// GET /api/ore-notturne-mese?mese=2025-06 -> solo il totale ore notturne (per la home)
+// GET /api/ore-notturne-mese?mese=2026-06 -> totale ore notturne MATURATE in
+// questo mese di competenza (per la card "Questo mese" in home), tenendo
+// conto dei cambi turno in tempo reale.
 router.get('/ore-notturne-mese', (req, res) => {
   const { mese } = req.query;
   const meseTarget = mese || new Date().toISOString().slice(0, 7);
-  const turniDelMese = db.get('turni').value().filter(t => t.data.startsWith(meseTarget));
+  const turniEffettivi = calcolaTurniEffettiviMese(meseTarget);
 
   let oreNotturneTotali = 0;
-  turniDelMese.forEach(t => {
+  turniEffettivi.forEach(t => {
     if (t.tipo === 'r') return;
     const { oreNotturne } = calcolaPaga.scomponiOreNotteGiorno(t.orario);
     oreNotturneTotali += oreNotturne;
