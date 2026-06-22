@@ -249,7 +249,7 @@
         <div class="card-label">Questo mese</div>
         <div class="row"><span class="rl">Ore notturne (20-08)</span><span class="rv" id="statOreNotturne" style="color:var(--purple)">–</span></div>
         <div class="row"><span class="rl">Ore lavorate totali</span><span class="rv" id="statOreMese">–</span></div>
-        <div class="row"><span class="rl">Stima paga (con magg.)</span><span class="rv" id="statPaga" style="color:var(--green)">€ –</span></div>
+        <div class="row"><span class="rl">Maturato questo mese</span><span class="rv" id="statPaga" style="color:var(--green)">€ –</span></div>
         <div class="section-link" style="margin-top:8px;display:inline-block;" onclick="showTab('impostazioni')">Vedi dettaglio completo →</div>
       </div>
     </div>
@@ -467,11 +467,14 @@
           <div class="pay-amount" id="bigPay">€ –</div>
           <div class="pay-label" id="payLabelOre">– ore lavorate</div>
         </div>
+        <div id="competenzaNote" style="font-size:11px;color:var(--text3);text-align:center;margin-bottom:10px;"></div>
         <div class="row"><span class="rl">Ore diurne feriali</span><span class="rv" id="rOreDiurneFeriali">–</span></div>
-        <div class="row"><span class="rl">Ore notturne feriali (+50%)</span><span class="rv" id="rOreNottFeriali">–</span></div>
-        <div class="row"><span class="rl">Ore diurne festive (+45%)</span><span class="rv" id="rOreDiurneFestive">–</span></div>
-        <div class="row"><span class="rl">Ore notturne festive (+55%)</span><span class="rv" id="rOreNottFestive">–</span></div>
-        <div class="row"><span class="rl">Paga ordinaria</span><span class="rv" id="rPagaOrdinaria">–</span></div>
+        <div class="row"><span class="rl">Ore notturne feriali</span><span class="rv" id="rOreNottFeriali">–</span></div>
+        <div class="row"><span class="rl">Ore domenica diurne</span><span class="rv" id="rOreDomDiurne">–</span></div>
+        <div class="row"><span class="rl">Ore domenica notturne</span><span class="rv" id="rOreDomNotturne">–</span></div>
+        <div class="row"><span class="rl">Ore festività nazionale</span><span class="rv" id="rOreFestNaz">–</span></div>
+        <div class="row"><span class="rl">Indennità giornaliere</span><span class="rv" id="rIndennita">–</span></div>
+        <div class="row"><span class="rl">Paga ordinaria + magg.</span><span class="rv" id="rPagaOrdinaria">–</span></div>
         <div class="row"><span class="rl">Paga straordinari</span><span class="rv" id="rPagaStraordinari" style="color:var(--orange)">–</span></div>
       </div>
 
@@ -666,7 +669,7 @@ async function caricaStatisticheMese() {
   const meseCorrente = formattaDataLocale(new Date()).slice(0, 7); // YYYY-MM
   const [oreNotturne, riepilogoPaga] = await Promise.all([
     apiFetch(`/api/ore-notturne-mese?mese=${meseCorrente}`),
-    apiFetch(`/api/paga-mensile?mese=${meseCorrente}`)
+    apiFetch(`/api/paga-mensile?mese=${meseCorrente}&mese_competenza_diretto=1`)
   ]);
 
   if (oreNotturne) {
@@ -993,6 +996,7 @@ async function saveSwap() {
     selectedColleagueGroup = null;
     await loadCambi();
     buildWeekStrip();
+    buildToday(); // ricalcola le statistiche in home, incluse le ore notturne
     toast('✅ Cambio salvato! Visibile nel calendario.');
   } else {
     toast('Errore salvataggio', true);
@@ -1098,6 +1102,7 @@ async function deleteSwap(id) {
   await apiFetch('/api/cambi/' + id, { method:'DELETE' });
   await loadCambi();
   buildWeekStrip();
+  buildToday(); // ricalcola le ore notturne in home
   toast('Cambio eliminato');
 }
 
@@ -1203,15 +1208,25 @@ async function caricaRiepilogoPagaCompleto() {
   if (!riepilogo) return;
 
   document.getElementById('bigPay').textContent = '€ ' + riepilogo.pagaTotale.toFixed(2);
-  document.getElementById('payLabelOre').textContent = `${riepilogo.oreLavorateTotali.toFixed(1)} ore lavorate`;
+  document.getElementById('payLabelOre').textContent = `${riepilogo.oreLavorateTotali.toFixed(1)} ore lavorate · ${riepilogo.giorniLavorati} giorni`;
+
+  // Mostra chiaramente il mese di competenza usato per il calcolo, dato lo
+  // sfasamento contrattuale (lo stipendio del mese selezionato paga le ore
+  // del mese precedente).
+  const [annoComp, meseComp] = riepilogo.mese_competenza.split('-');
+  document.getElementById('competenzaNote').textContent =
+    `Calcolato sulle ore di ${MONTHS[parseInt(meseComp)-1]} ${annoComp} (competenza del mese precedente)`;
+
   document.getElementById('rOreDiurneFeriali').textContent = riepilogo.oreDiurneFeriali.toFixed(1) + 'h';
   document.getElementById('rOreNottFeriali').textContent = riepilogo.oreNotturneFeriali.toFixed(1) + 'h';
-  document.getElementById('rOreDiurneFestive').textContent = riepilogo.oreDiurneFestive.toFixed(1) + 'h';
-  document.getElementById('rOreNottFestive').textContent = riepilogo.oreNotturneFestive.toFixed(1) + 'h';
+  document.getElementById('rOreDomDiurne').textContent = riepilogo.oreDomenicaDiurne.toFixed(1) + 'h';
+  document.getElementById('rOreDomNotturne').textContent = riepilogo.oreDomenicaNotturne.toFixed(1) + 'h';
+  document.getElementById('rOreFestNaz').textContent = riepilogo.oreFestivitaNazionale.toFixed(1) + 'h';
+  document.getElementById('rIndennita').textContent = '€ ' + riepilogo.indennitaGiornaliereTotali.toFixed(2);
   document.getElementById('rPagaOrdinaria').textContent = '€ ' + riepilogo.pagaOrdinaria.toFixed(2);
   document.getElementById('rPagaStraordinari').textContent = '€ ' + riepilogo.pagaStraordinari.toFixed(2);
 
-  caricaListaStraordinari(mese);
+  caricaListaStraordinari(riepilogo.mese_competenza);
 }
 
 async function caricaListaStraordinari(mese) {
