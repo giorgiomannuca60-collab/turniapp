@@ -87,7 +87,7 @@
   .cal-cell.swap-cal::after{content:'';position:absolute;bottom:0;left:0;right:0;height:3px;background:var(--swap);opacity:.85;}
   .cn-num{font-size:12px;font-weight:700;}
   .cn-m{color:#60a5fa;} .cn-p{color:#34d399;} .cn-s,.cn-n{color:#a78bfa;} .cn-r{color:var(--text3);} .cn-swap{color:var(--swap);}
-  .cc{font-size:7px;font-weight:700;margin-top:1px;}
+  .cc-orario{font-size:8px;font-weight:600;margin-top:1px;font-family:'DM Mono',monospace;letter-spacing:0;}
   .swap-dot{position:absolute;bottom:2px;right:2px;width:6px;height:6px;border-radius:50%;background:var(--swap);}
   .note-indicator{position:absolute;top:2px;left:2px;font-size:8px;line-height:1;}
   .legend{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);}
@@ -848,13 +848,21 @@ async function buildCal() {
     const swap = getSwap(dateStr);
     const isToday = (day === now.getDate() && calMonth === now.getMonth() && calYear === now.getFullYear());
 
-    // Il turno EFFETTIVO determina colore/badge della cella: se c'è un cambio,
-    // non è più quello originale (ceduto), ma quello ricevuto (o Riposo).
+    // Calcola il turno EFFETTIVO (dopo i cambi)
     let tEffettivo = turnoOriginale ? turnoOriginale.tipo : '';
+    let orarioEffettivo = turnoOriginale ? turnoOriginale.orario : '';
     if (swap) {
-      tEffettivo = (swap.orario_ricevuto && swap.data_ricevuta === dateStr)
-        ? classificaOrarioSemplice(swap.orario_ricevuto)
-        : 'r';
+      const isRicevutoOggi = swap.orario_ricevuto && swap.data_ricevuta === dateStr;
+      tEffettivo = isRicevutoOggi ? classificaOrarioSemplice(swap.orario_ricevuto) : 'r';
+      orarioEffettivo = isRicevutoOggi ? swap.orario_ricevuto : 'Riposo';
+    }
+
+    // Formatta l'orario da mostrare nella cella:
+    // "08:00-13:00" → "08:00" (solo ora inizio, per non occupare troppo spazio)
+    // "Riposo" → niente testo aggiuntivo (la cella rimane scura e silenziosa)
+    let orarioBreve = '';
+    if (orarioEffettivo && orarioEffettivo !== 'Riposo' && tEffettivo !== 'r') {
+      orarioBreve = orarioEffettivo.split('-')[0]; // solo ora di inizio, es. "08:00"
     }
 
     const cell = document.createElement('div');
@@ -866,7 +874,9 @@ async function buildCal() {
 
     const numCls = 'cn-' + (tEffettivo || 'r');
     cell.innerHTML = `<div class="cn-num ${numCls}">${day}</div>`;
-    if (tEffettivo && tEffettivo !== 'r') cell.innerHTML += `<div class="cc" style="color:${TYPE_COLOR[tEffettivo]}">${tEffettivo.toUpperCase()}</div>`;
+    if (orarioBreve) {
+      cell.innerHTML += `<div class="cc-orario" style="color:${TYPE_COLOR[tEffettivo]};font-size:8px;font-family:'DM Mono',monospace;margin-top:1px;font-weight:600;">${orarioBreve}</div>`;
+    }
     if (swap) cell.innerHTML += `<div class="swap-dot"></div>`;
     if (noteMap[dateStr]) cell.innerHTML += `<div class="note-indicator">📝</div>`;
 
