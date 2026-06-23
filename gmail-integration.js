@@ -162,15 +162,32 @@ async function scaricaAllegati(oauth2Client, messageId, cartellaDestinazione) {
 }
 
 /**
- * Determina se un'email/allegato è probabilmente il SETTIMANALE o il GIORNALIERO,
- * in base a parole chiave nell'oggetto dell'email e nel nome del file.
+ * Determina se un'email/allegato è probabilmente il SETTIMANALE o il GIORNALIERO.
+ * Logica migliorata:
+ * - Excel (.xlsx/.xls) → quasi sempre settimanale
+ * - PDF con "DAL ... AL ..." nell'oggetto → settimanale
+ * - PDF con parole chiave giornaliero → giornaliero
+ * - PDF senza indicazioni → giornaliero (default per i PDF, perché il
+ *   settimanale viene spesso mandato in Excel, il giornaliero sempre in PDF)
  */
 function indovinaTipo(oggetto, nomeFile) {
   const testo = (oggetto + ' ' + nomeFile).toLowerCase();
-  if (testo.includes('settiman') || testo.includes('dal ') || testo.includes(' al ')) return 'settimanale';
-  if (testo.includes('giornal') || testo.includes('ordine di servizio') || testo.includes('giorno')) return 'giornaliero';
-  // Fallback sull'estensione: PDF piccoli singola pagina sono spesso giornalieri,
-  // ma non è affidabile al 100% — meglio segnalarlo come incerto.
+  const estensione = nomeFile.toLowerCase().split('.').pop();
+
+  // Excel → sicuramente settimanale
+  if (estensione === 'xlsx' || estensione === 'xls') return 'settimanale';
+
+  // PDF con range di date nel titolo → settimanale
+  if (/dal\s+\d{1,2}\s+al\s+\d{1,2}/.test(testo)) return 'settimanale';
+  if (testo.includes('settiman')) return 'settimanale';
+
+  // PDF con parole chiave giornaliero → giornaliero
+  if (testo.includes('giornal') || testo.includes('ordine di servizio') ||
+      testo.includes('giorno') || testo.includes('servizio del')) return 'giornaliero';
+
+  // PDF senza indicazioni chiare → giornaliero (default per i PDF)
+  if (estensione === 'pdf') return 'giornaliero';
+
   return 'incerto';
 }
 

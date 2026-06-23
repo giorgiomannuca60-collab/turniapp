@@ -58,6 +58,46 @@ function oggiLocale() {
 }
 
 /**
+ * Calcola le date a cui si riferisce un giornaliero ricevuto nel giorno
+ * `dataRicezione` (formato YYYY-MM-DD), seguendo la regola confermata
+ * da Giorgio:
+ *
+ * - Normalmente: il giornaliero del giorno X si riferisce a X+1 (domani)
+ * - Venerdì: si riferisce a sabato, domenica E lunedì (3 giorni)
+ * - Se X+1 è festività nazionale: si riferisce a X+1 E X+2 (2 giorni),
+ *   perché gli uffici non lavorano nel festivo, quindi includono anche
+ *   il giorno dopo il festivo
+ *
+ * Ritorna un array di stringhe YYYY-MM-DD in ordine cronologico.
+ */
+function calcolaDateGiornaliero(dataRicezione) {
+  const { isFestivita } = require('./festivita-italiane');
+  const d = new Date(dataRicezione + 'T00:00:00');
+  const giornoSettimana = d.getDay(); // 0=dom, 1=lun, ..., 5=ven, 6=sab
+
+  const dateRiferite = [];
+
+  if (giornoSettimana === 5) {
+    // Venerdì: sabato, domenica e lunedì
+    for (let i = 1; i <= 3; i++) {
+      dateRiferite.push(parserTurni.formattaDataLocale(parserTurni.aggiungiGiorni(d, i)));
+    }
+  } else {
+    // Tutti gli altri giorni: domani
+    const domani = parserTurni.aggiungiGiorni(d, 1);
+    const domaniStr = parserTurni.formattaDataLocale(domani);
+    dateRiferite.push(domaniStr);
+
+    // Se domani è festività nazionale, aggiungi anche dopodomani
+    if (isFestivita(domaniStr)) {
+      dateRiferite.push(parserTurni.formattaDataLocale(parserTurni.aggiungiGiorni(d, 2)));
+    }
+  }
+
+  return dateRiferite;
+}
+
+/**
  * Calcola la data da usare come "riferimento" per indovinare l'anno quando
  * il titolo del file settimanale non lo specifica (es. "TURNI DAL 22 AL 28
  * GIUGNO", senza anno). Usa ANNO_RIFERIMENTO come ancora fissa (configurabile
@@ -108,41 +148,61 @@ function elaboraSettimanale(griglia, dataLunediRilevata, dataLunediForzata, db) 
 }
 
 /**
- * Elabora il GIORNALIERO (PDF): trova il turno di oggi/della data indicata,
- * lo confronta con quello già calcolato/salvato per quella data, e segnala
- * eventuali discrepanze.
+ * Elabora il GIORNALIERO (PDF): trova il turno di Giorgio, lo confronta con
+ * quelli già calcolati/salvati per le date di riferimento (che possono essere
+ * più di una: es. venerdì si riferisce a sab+dom+lun), e segnala discrepanze.
+ *
+ * dateRiferite: array di stringhe YYYY-MM-DD a cui si riferisce questo giornaliero
  */
-function elaboraGiornaliero(risultatoPdf, dataDaControllare, db) {
+function elaboraGiornaliero(risultatoPdf, dateRiferite, db) {
   if (!risultatoPdf.trovato) {
     return { discrepanza: false, messaggio: risultatoPdf.messaggio, dettagli: null };
   }
 
-  const turnoSalvato = db.get('turni').find({ data: dataDaControllare }).value();
+  if (!Array.isArray(dateRiferite)) dateRiferite = [dateRiferite]; // compatibilità retroattiva
 
-  if (risultatoPdf.assente) {
-    return {
-      discrepanza: !!turnoSalvato && turnoSalvato.tipo !== 'r',
-      messaggio: `Giornaliero segnala ASSENTE per ${dataDaControllare}.`,
-      dettagli: risultatoPdf
-    };
+  const discrepanze = [];
+  const messaggi = [];
+
+  for (const dataDaControllare of dateRiferite) {
+    const turnoSalvato = db.get('turni').find({ data: dataDaControllare }).value();
+
+    if (risultatoPdf.assente) {
+      if (turnoSalvato && turnoSalvato.tipo !== 'r') {
+        discrepanze.push({ data: dataDaControllare, tipo: 'assente' });
+        messaggi.push(`${dataDaControllare}: giornaliero segnala ASSENTE ma nel piano c'è turno ${turnoSalvato.orario}`);
+      }
+      continue;
+    }
+
+    if (!turnoSalvato) {
+      messaggi.push(`${dataDaControllare}: nessun turno calcolato salvato, impossibile confrontare`);
+      continue;
+    }
+
+    if (!risultatoPdf.orario) {
+      messaggi.push(`${dataDaControllare}: orario non estratto dal PDF`);
+      continue;
+    }
+
+    const normalizza = s => (s || '').replace(/\s/g, '').replace('–','-').replace('—','-');
+    const uguale = normalizza(turnoSalvato.orario) === normalizza(risultatoPdf.orario);
+
+    if (!uguale) {
+      discrepanze.push({ data: dataDaControllare, atteso: turnoSalvato.orario, reale: risultatoPdf.orario });
+      messaggi.push(`⚠️ DISCREPANZA ${dataDaControllare}: piano="${turnoSalvato.orario}" · giornaliero="${risultatoPdf.orario}"`);
+    } else {
+      messaggi.push(`${dataDaControllare}: ✅ confermato ${risultatoPdf.orario}`);
+    }
   }
 
-  if (!turnoSalvato) {
-    return { discrepanza: false, messaggio: 'Nessun turno calcolato salvato per questa data, impossibile confrontare.', dettagli: risultatoPdf };
-  }
-
-  const normalizza = s => (s || '').replace(/\s/g, '').replace('–', '-').replace('—', '-');
-  const uguale = normalizza(turnoSalvato.orario) === normalizza(risultatoPdf.orario);
-
-  if (!uguale) {
-    return {
-      discrepanza: true,
-      messaggio: `⚠️ DISCREPANZA ${dataDaControllare}: piano = "${turnoSalvato.orario}" · giornaliero = "${risultatoPdf.orario}"`,
-      dettagli: risultatoPdf
-    };
-  }
-
-  return { discrepanza: false, messaggio: `Nessuna discrepanza: il giornaliero conferma ${risultatoPdf.orario}.`, dettagli: risultatoPdf };
+  return {
+    discrepanza: discrepanze.length > 0,
+    date_riferite: dateRiferite,
+    messaggio: messaggi.join(' | '),
+    discrepanze,
+    dettagli: risultatoPdf
+  };
 }
 
 // Upload manuale dal frontend (Excel/PDF settimanale, PDF giornaliero)
@@ -202,8 +262,15 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       }
 
       const risultatoPdf = await parserPdf.leggiGiornalieroPdf(filePath, COGNOME_GIORGIO);
-      const dataDaControllare = req.body.data || oggiLocale();
-      const confronto = elaboraGiornaliero(risultatoPdf, dataDaControllare, db);
+
+      // Se il client passa esplicitamente una data, usala; altrimenti calcola
+      // automaticamente le date di riferimento in base al giorno della settimana
+      // (es. venerdì → sab+dom+lun, pre-festivo → domani+dopodomani, ecc.)
+      const dateRiferite = req.body.data
+        ? [req.body.data]
+        : calcolaDateGiornaliero(oggiLocale());
+
+      const confronto = elaboraGiornaliero(risultatoPdf, dateRiferite, db);
 
       db.get('email_log').push({
         tipo, filename,
@@ -214,7 +281,13 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       }).write();
 
       fs.unlinkSync(filePath);
-      return res.json({ ok: true, tipo, filename, messaggio: confronto.messaggio, discrepanza: confronto.discrepanza, dettagli: confronto.dettagli });
+      return res.json({
+        ok: true, tipo, filename,
+        date_riferite: dateRiferite,
+        messaggio: confronto.messaggio,
+        discrepanza: confronto.discrepanza,
+        dettagli: confronto.dettagli
+      });
     }
   } catch (err) {
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
@@ -320,8 +393,7 @@ async function scansionaEmailTurni() {
       const tipoIndovinato = gmailIntegration.indovinaTipo(oggetto, allegato.nomeOriginale);
 
       try {
-        if (tipoIndovinato === 'settimanale' || (tipoIndovinato === 'incerto' && allegato.estensione !== '.pdf')) {
-          // Excel è quasi sempre il settimanale; i PDF "incerti" li trattiamo come giornaliero di default
+        if (tipoIndovinato === 'settimanale') {
           let griglia, dataLunediRilevata;
           const dataRiferimentoAnno = calcolaDataRiferimentoAnno(db);
           if (allegato.estensione === '.pdf') {
@@ -344,9 +416,17 @@ async function scansionaEmailTurni() {
           risultati.push({ tipo: 'settimanale', file: allegato.nomeOriginale, ok: true });
 
         } else {
-          // Giornaliero PDF
+          // Giornaliero PDF — usa la data di ricezione dell'email (non "oggi"
+          // del server) per calcolare le date di riferimento corrette, perché
+          // le email possono arrivare di notte o al mattino presto e il server
+          // potrebbe trovarsi in un fuso orario diverso.
+          const dataRicezioneEmail = dataRicezione
+            ? parserTurni.formattaDataLocale(new Date(dataRicezione))
+            : oggiLocale();
+
+          const dateRiferite = calcolaDateGiornaliero(dataRicezioneEmail);
           const risultatoPdf = await parserPdf.leggiGiornalieroPdf(allegato.percorsoLocale, COGNOME_GIORGIO);
-          const confronto = elaboraGiornaliero(risultatoPdf, oggiLocale(), db);
+          const confronto = elaboraGiornaliero(risultatoPdf, dateRiferite, db);
 
           db.get('email_log').push({
             tipo: 'giornaliero', filename: allegato.nomeOriginale,
