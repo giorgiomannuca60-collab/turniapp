@@ -21,12 +21,14 @@ db.defaults({
     notif_discrepanze: '1'
   },
   next_cambio_id: 1,
-  gmail_tokens: null,            // { access_token, refresh_token, expiry_date, connesso_il }
-  gmail_ultima_scansione: null,  // data ISO dell'ultima scansione email riuscita
-  gmail_email_elaborate: [],     // [{ id, elaborata_il }] per non rielaborare la stessa email due volte
-  straordinari: [],              // [{ id, data, ore, notturno, giornoRiposo, note }]
+  gmail_tokens: null,
+  gmail_ultima_scansione: null,
+  gmail_email_elaborate: [],
+  straordinari: [],
   next_straordinario_id: 1,
-  note_calendario: []            // [{ data, testo, created_at, updated_at }]
+  note_calendario: [],
+  push_subscriptions: [],   // subscription push di ogni dispositivo registrato
+  vapid_keys: null           // chiavi VAPID generate al primo avvio
 }).write();
 
 // Inserisci dati di esempio solo se il database è vuoto
