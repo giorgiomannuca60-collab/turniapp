@@ -4,13 +4,28 @@
  * delle email contenenti il piano settimanale e il giornaliero,
  * scaricandone gli allegati e passandoli ai parser esistenti.
  *
- * Flusso:
- * 1. L'utente clicca "Connetti Gmail" → reindirizzato a Google per autorizzare
- * 2. Google rimanda a /auth/google/callback con un "code"
- * 3. Scambiamo il code per un access_token + refresh_token, salvati nel database
- * 4. Un controllo periodico (cron, ogni N minuti) usa il refresh_token per
- *    cercare nuove email con allegati, scaricarli ed elaborarli automaticamente
+ * PATCH Railway/Node 22+: googleapis usa internamente node-fetch per lo
+ * scambio token OAuth, che dal 19 giugno 2026 fallisce con "Premature close"
+ * su Railway a causa di un bug keep-alive con le nuove versioni di Node.
+ * La soluzione confermata: sostituire node-fetch con il fetch globale di Node
+ * (basato su undici), che non ha questo problema.
  */
+
+// Patch PRIMA di importare googleapis: forza l'uso del fetch globale di Node
+// al posto di node-fetch in tutta la catena googleapis → google-auth-library → gaxios
+if (typeof globalThis.fetch === 'function') {
+  process.env.GAXIOS_FETCH = 'native'; // segnala a gaxios di usare il fetch nativo
+  try {
+    // Override diretto del fetch usato da gaxios (il client HTTP di googleapis)
+    const gaxios = require('gaxios');
+    if (gaxios && gaxios.instance) {
+      gaxios.instance.defaults = gaxios.instance.defaults || {};
+      gaxios.instance.defaults.fetchImplementation = globalThis.fetch.bind(globalThis);
+    }
+  } catch (e) {
+    // Se gaxios non è disponibile direttamente, la variabile GAXIOS_FETCH è sufficiente
+  }
+}
 
 const { google } = require('googleapis');
 const fs = require('fs');
@@ -44,15 +59,41 @@ function generaUrlAutorizzazione() {
 /**
  * Scambia il "code" ricevuto da Google (dopo l'autorizzazione) con i token
  * di accesso, e li salva nel database per riutilizzarli nei controlli futuri.
+ *
+ * Usa direttamente il fetch globale di Node (undici) per lo scambio token,
+ * bypassando completamente node-fetch/gaxios che causa "Premature close" su
+ * Railway con Node 22+.
  */
 async function scambiaCodeConToken(code, db) {
-  const oauth2Client = creaOAuthClient();
-  const { tokens } = await oauth2Client.getToken(code);
+  const redirectUri = process.env.GMAIL_REDIRECT_URI ||
+    `${process.env.APP_BASE_URL || 'http://localhost:3000'}/auth/google/callback`;
+
+  // Usa fetch nativo (undici) invece di googleapis per questo scambio critico
+  const params = new URLSearchParams({
+    code,
+    client_id: process.env.GMAIL_CLIENT_ID,
+    client_secret: process.env.GMAIL_CLIENT_SECRET,
+    redirect_uri: redirectUri,
+    grant_type: 'authorization_code'
+  });
+
+  const risposta = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString()
+  });
+
+  if (!risposta.ok) {
+    const errore = await risposta.text();
+    throw new Error(`Errore Google OAuth: ${risposta.status} — ${errore}`);
+  }
+
+  const tokens = await risposta.json();
 
   db.set('gmail_tokens', {
     access_token: tokens.access_token,
     refresh_token: tokens.refresh_token,
-    expiry_date: tokens.expiry_date,
+    expiry_date: tokens.expiry_date || (Date.now() + (tokens.expires_in || 3600) * 1000),
     connesso_il: new Date().toISOString()
   }).write();
 
