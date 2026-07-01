@@ -8,6 +8,7 @@ const cron = require('node-cron');
 const parserTurni = require('./parser-turni');
 const parserPdf = require('./parser-pdf');
 const gmailIntegration = require('./gmail-integration');
+const notifichePush = require('./notifiche-push');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -280,6 +281,17 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         created_at: new Date().toISOString()
       }).write();
 
+      // Invia notifica push se c'è una discrepanza
+      if (confronto.discrepanza) {
+        notifichePush.inizializzaVapid(db);
+        await notifichePush.inviaNotifica(db, {
+          title: '⚠️ TurniApp — Discrepanza rilevata',
+          body: confronto.messaggio,
+          tipo: 'discrepanza',
+          url: '/#email'
+        });
+      }
+
       fs.unlinkSync(filePath);
       return res.json({
         ok: true, tipo, filename,
@@ -295,6 +307,78 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     return res.status(500).json({ error: 'Errore durante la lettura del file: ' + err.message });
   }
 });
+
+// ===== NOTIFICHE PUSH =====
+
+// Restituisce la chiave pubblica VAPID al frontend (serve per creare la subscription)
+app.get('/api/push/vapid-public-key', (req, res) => {
+  const db = require('./db/database');
+  const chiavePublica = notifichePush.inizializzaVapid(db);
+  res.json({ publicKey: chiavePublica });
+});
+
+// Registra la subscription push di un dispositivo
+app.post('/api/push/subscribe', (req, res) => {
+  const { subscription } = req.body;
+  if (!subscription || !subscription.endpoint) {
+    return res.status(400).json({ error: 'Subscription non valida' });
+  }
+  const db = require('./db/database');
+  notifichePush.inizializzaVapid(db);
+  notifichePush.salvaSubscription(db, subscription);
+  res.json({ ok: true });
+});
+
+// Rimuove la subscription (quando l'utente disattiva le notifiche)
+app.post('/api/push/unsubscribe', (req, res) => {
+  const { endpoint } = req.body;
+  const db = require('./db/database');
+  notifichePush.rimuoviSubscription(db, endpoint);
+  res.json({ ok: true });
+});
+
+// Test notifica (per verificare che funzioni dal pannello impostazioni)
+app.post('/api/push/test', async (req, res) => {
+  const db = require('./db/database');
+  notifichePush.inizializzaVapid(db);
+  const risultato = await notifichePush.inviaNotifica(db, {
+    title: '✅ TurniApp — Test notifica',
+    body: 'Le notifiche funzionano correttamente!',
+    tipo: 'generico',
+    url: '/'
+  });
+  res.json(risultato);
+});
+
+// Cron mattutino: ogni giorno alle 07:00 invia il turno del giorno
+cron.schedule('0 7 * * *', async () => {
+  try {
+    const db = require('./db/database');
+    const oggi = oggiLocale();
+    const turno = db.get('turni').find({ data: oggi }).value();
+
+    let body = turno
+      ? `${turno.orario} — ${turno.tipo === 'r' ? 'Giorno di riposo 😴' : 'Buona giornata! 💪'}`
+      : 'Nessun turno trovato per oggi';
+
+    // Controlla anche i cambi turno per modificare il messaggio
+    const cambio = db.get('cambi').value().find(c => c.data_ceduta === oggi);
+    if (cambio) {
+      body = cambio.data_ricevuta === oggi && cambio.orario_ricevuto
+        ? `${cambio.orario_ricevuto} (cambio con ${cambio.collega})`
+        : `Riposo — turno ceduto a ${cambio.collega}`;
+    }
+
+    await notifichePush.inviaNotifica(db, {
+      title: `📅 Turno di oggi — ${oggi}`,
+      body,
+      tipo: 'turno_giorno',
+      url: '/'
+    });
+  } catch (err) {
+    console.error('Errore cron notifica mattutina:', err.message);
+  }
+}, { timezone: 'Europe/Rome' });
 
 // ===== GMAIL OAUTH E SCANSIONE AUTOMATICA =====
 
@@ -435,6 +519,26 @@ async function scansionaEmailTurni() {
             discrepanza_note: confronto.discrepanza ? confronto.messaggio : '',
             created_at: new Date().toISOString()
           }).write();
+
+          // Notifica push: discrepanza (alta priorità) o conferma turno
+          notifichePush.inizializzaVapid(db);
+          if (confronto.discrepanza) {
+            await notifichePush.inviaNotifica(db, {
+              title: '⚠️ TurniApp — Discrepanza rilevata',
+              body: confronto.messaggio,
+              tipo: 'discrepanza',
+              url: '/#email'
+            });
+          } else if (risultatoPdf.trovato && risultatoPdf.orario) {
+            // Notifica di conferma: "domani il tuo turno è confermato"
+            const dataRif = dateRiferite[0] || '';
+            await notifichePush.inviaNotifica(db, {
+              title: `📋 Turno confermato — ${dataRif}`,
+              body: `${risultatoPdf.orario} — nessuna variazione rispetto al piano`,
+              tipo: 'nuova_email',
+              url: '/'
+            });
+          }
 
           risultati.push({ tipo: 'giornaliero', file: allegato.nomeOriginale, ok: true, discrepanza: confronto.discrepanza });
         }
