@@ -1,12 +1,19 @@
 /**
  * parser-pdf.js
- * Legge i PDF che arrivano via email: il piano SETTIMANALE (stessa griglia
- * a 15 gruppi vista nell'Excel, ma esportata in PDF) e l'ordine di servizio
- * GIORNALIERO (elenco nominativo con orario del giorno).
+ * Legge i PDF che arrivano via email: il piano SETTIMANALE e l'ordine di
+ * servizio GIORNALIERO.
  *
- * L'estrazione testo da PDF è meno strutturata di un Excel (niente celle,
- * solo testo "appiattito"), quindi i pattern qui sono scritti per essere
- * tolleranti a piccole variazioni di spaziatura/a capo.
+ * Gestisce DUE formati diversi osservati nei file reali:
+ *
+ * FORMATO A (vecchio): ogni riga ha "GRUPPO N" davanti ai 7 turni
+ *   es. "GRUPPO 11   RIPOSO  18/23  12/17  ..."
+ *
+ * FORMATO B (nuovo - part-time luglio 2026): griglia senza etichette,
+ *   con la lista ordinata dei gruppi in fondo al documento dopo
+ *   "TURNI DAL X al Y Mese":
+ *   Riga 1: RIPOSO 20/01 16/21 ...  → GRUPPO 1 (dalla legenda)
+ *   Riga 2: 11/16 8/13 7/12 ...     → GRUPPO 14 (dalla legenda)
+ *   ...
  */
 
 const fs = require('fs');
@@ -18,22 +25,15 @@ const MESI_IT = {
   LUGLIO: 6, AGOSTO: 7, SETTEMBRE: 8, OTTOBRE: 9, NOVEMBRE: 10, DICEMBRE: 11
 };
 
-/**
- * Estrae tutto il testo grezzo da un file PDF.
- */
 async function estraiTestoPdf(filePath) {
   const buffer = fs.readFileSync(filePath);
   const dati = await pdfParse(buffer);
   return dati.text;
 }
 
-/**
- * Stessa logica di rilevamento data usata per l'Excel ("TURNI DAL 22 AL 28 GIUGNO"),
- * applicata al testo grezzo estratto dal PDF.
- */
 function estraiDataLunediDaTestoPdf(testo, dataRiferimento) {
   const meseRegex = new RegExp(`\\b(${Object.keys(MESI_IT).join('|')})\\b`, 'i');
-  const matchGiorni = testo.match(/DAL\s+(\d{1,2})\s+AL\s+(\d{1,2})/i);
+  const matchGiorni = testo.match(/DAL\s+(\d{1,2})\s+[Aa][Ll]?\s+(\d{1,2})/i);
   const matchMese = testo.match(meseRegex);
   const matchAnno = testo.match(/\b(20\d{2})\b/);
 
@@ -44,10 +44,6 @@ function estraiDataLunediDaTestoPdf(testo, dataRiferimento) {
   let anno = matchAnno ? parseInt(matchAnno[1]) : null;
 
   if (anno === null) {
-    // Anno non scritto: scegli quello più vicino al riferimento passato dal
-    // chiamante (es. mediana delle date già nel database), non alla data
-    // odierna del server, che può discostarsi di mesi/anni dal periodo
-    // effettivamente caricato dall'utente.
     const riferimento = dataRiferimento ? new Date(dataRiferimento + 'T00:00:00') : new Date();
     const candidati = [riferimento.getFullYear() - 1, riferimento.getFullYear(), riferimento.getFullYear() + 1];
     let migliore = null, distanzaMin = Infinity;
@@ -63,59 +59,105 @@ function estraiDataLunediDaTestoPdf(testo, dataRiferimento) {
 }
 
 /**
- * Legge il PDF del piano SETTIMANALE e ricostruisce la griglia { numGruppo: [7 turni] },
- * stesso formato output di leggiGrigliaSettimanale() in parser-turni.js (per l'Excel),
- * così il resto del programma (calcolo rotazione, confronto discrepanze) funziona identico
- * indipendentemente dal fatto che il file fosse Excel o PDF.
- *
- * Il testo PDF non ha colonne reali: ogni riga "GRUPPO N" è seguita dai 7 turni
- * della settimana, separati da spazi, nello stesso ordine Lun→Dom.
- * Pattern atteso per riga: "GRUPPO 11   RIPOSO  18/23  12/17  12/17  10/15  11/16  RIPOSO"
+ * FORMATO B: griglia senza etichette, ordine gruppi in fondo al documento.
  */
+function tentaFormatoB(testo) {
+  const TOKEN = /RIPOSO|\b[Rr]\b|\d{1,2}\/\d{1,2}/g;
+
+  // Trova il separatore "TURNI DAL" che divide griglia da legenda
+  const idxSeparatore = testo.search(/TURNI\s+DAL\s+\d{1,2}/i);
+  if (idxSeparatore === -1) return null;
+
+  const testoGriglia = testo.slice(0, idxSeparatore);
+  const testoLegenda = testo.slice(idxSeparatore);
+
+  // Estrae righe della griglia: righe con almeno 7 token turno validi
+  const righeGriglia = [];
+  for (const riga of testoGriglia.split('\n')) {
+    const token = riga.match(TOKEN) || [];
+    if (token.length >= 7) {
+      righeGriglia.push(token.slice(0, 7));
+    }
+  }
+
+  // Estrae l'ordine dei gruppi dalla legenda (deduplica mantenendo ordine)
+  const ordineGruppi = [];
+  const seen = new Set();
+  const regexGruppo = /GRUPPO\s*(\d{1,2})/gi;
+  let m;
+  while ((m = regexGruppo.exec(testoLegenda)) !== null) {
+    const n = parseInt(m[1]);
+    if (!seen.has(n)) { seen.add(n); ordineGruppi.push(n); }
+  }
+
+  if (righeGriglia.length === 0 || ordineGruppi.length === 0) return null;
+
+  const n = Math.min(righeGriglia.length, ordineGruppi.length);
+  const griglia = {};
+  for (let i = 0; i < n; i++) {
+    griglia[ordineGruppi[i]] = righeGriglia[i].map(t =>
+      classificaTurno(t.toUpperCase() === 'R' ? 'RIPOSO' : t)
+    );
+  }
+  return griglia;
+}
+
+/**
+ * FORMATO A: ogni riga ha "GRUPPO N" + 7 turni sulla stessa riga.
+ * Seconda difesa: evita di sovrascrivere dati già corretti con righe
+ * della sezione "elenco nomi" (che riusa GRUPPO N come intestazione colonna).
+ */
+function tentaFormatoA(testo) {
+  const griglia = {};
+  const regexGruppo = /GRUPPO\s*(\d{1,2})/gi;
+  const tokenTurnoRegex = /RIPOSO|\d{1,2}\/\d{1,2}/g;
+  let match;
+  const posizioni = [];
+
+  while ((match = regexGruppo.exec(testo)) !== null) {
+    posizioni.push({ numGruppo: parseInt(match[1]), fineMatch: regexGruppo.lastIndex });
+  }
+
+  for (let i = 0; i < posizioni.length; i++) {
+    const inizio = posizioni[i].fineMatch;
+    const fine = i + 1 < posizioni.length ? posizioni[i + 1].fineMatch - 10 : testo.length;
+    const segmento = testo.slice(inizio, fine);
+
+    // Ferma la scansione se la riga contiene più GRUPPO → sezione nomi
+    const occorrenze = (segmento.slice(0, 80).match(/GRUPPO/gi) || []).length;
+    if (occorrenze > 1) break;
+
+    const token = segmento.match(tokenTurnoRegex) || [];
+    if (token.length < 7) continue;
+    if (!griglia[posizioni[i].numGruppo]) {
+      griglia[posizioni[i].numGruppo] = token.slice(0, 7).map(t => classificaTurno(t));
+    }
+  }
+  return griglia;
+}
+
 async function leggiGrigliaSettimanalePdf(filePath, dataRiferimento) {
   const testo = await estraiTestoPdf(filePath);
   const dataLunediRilevata = estraiDataLunediDaTestoPdf(testo, dataRiferimento);
 
-  const griglia = {};
-
-  // Pattern: "GRUPPO" + numero, poi cattura fino a 7 token turno (RIPOSO o HH/HH)
-  // su quella riga o le righe immediatamente successive (alcuni PDF vanno a capo).
-  const regexGruppo = /GRUPPO\s*(\d{1,2})/gi;
-  let match;
-  const posizioni = [];
-  while ((match = regexGruppo.exec(testo)) !== null) {
-    posizioni.push({ numGruppo: parseInt(match[1]), indice: match.index, fineMatch: regexGruppo.lastIndex });
+  // Prova prima FORMATO B (legenda gruppi in fondo, più recente)
+  const grigliaB = tentaFormatoB(testo);
+  if (grigliaB && Object.keys(grigliaB).length >= 10) {
+    return { griglia: grigliaB, dataLunediRilevata };
   }
 
-  const tokenTurnoRegex = /RIPOSO|\d{1,2}\/\d{1,2}/g;
-
-  for (let i = 0; i < posizioni.length; i++) {
-    const inizio = posizioni[i].fineMatch;
-    const fine = (i + 1 < posizioni.length) ? posizioni[i + 1].indice : testo.length;
-    const segmento = testo.slice(inizio, fine);
-
-    const token = segmento.match(tokenTurnoRegex) || [];
-    if (token.length < 7) continue; // riga incompleta/non valida, salta
-
-    const turniSettimana = token.slice(0, 7).map(t => classificaTurno(t));
-    griglia[posizioni[i].numGruppo] = turniSettimana;
+  // Fallback FORMATO A (GRUPPO N davanti a ogni riga)
+  const grigliaA = tentaFormatoA(testo);
+  if (grigliaA && Object.keys(grigliaA).length >= 10) {
+    return { griglia: grigliaA, dataLunediRilevata };
   }
 
-  if (Object.keys(griglia).length === 0) {
-    throw new Error('Nessun gruppo riconosciuto nel PDF. Verifica che il file sia il piano settimanale corretto.');
-  }
-
-  return { griglia, dataLunediRilevata };
+  throw new Error('Nessun gruppo riconosciuto nel PDF. Verifica che il file sia il piano settimanale corretto.');
 }
 
 /**
  * Legge il PDF dell'ordine di servizio GIORNALIERO e cerca la riga
- * corrispondente al cognome di Giorgio, estraendone orario e note
- * (es. ASSENTE, *, #).
- *
- * Pattern tollerante: cerca "MANNUCA" (case-insensitive) seguito,
- * sulla stessa riga o nelle vicinanze, da un orario HH:MM-HH:MM o HH/HH,
- * più eventuali note come ASSENTE, *, #.
+ * corrispondente al cognome di Giorgio.
  */
 async function leggiGiornalieroPdf(filePath, cognome = 'MANNUCA') {
   const testo = await estraiTestoPdf(filePath);
@@ -135,7 +177,6 @@ async function leggiGiornalieroPdf(filePath, cognome = 'MANNUCA') {
     return { trovato: false, messaggio: `Nome "${cognome}" non trovato nel giornaliero caricato.` };
   }
 
-  // Cerca orario in formato HH:MM-HH:MM oppure HH/HH (gestendo anche turno notte tipo 20:00-01:00)
   const matchOrarioCompleto = rigaTrovata.match(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/);
   const matchOrarioBreve = rigaTrovata.match(/(\d{1,2})\/(\d{1,2})/);
 
