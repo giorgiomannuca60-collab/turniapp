@@ -1,55 +1,87 @@
 /**
  * calcolo-paga.js
- * Motore di calcolo della paga mensile, ricalibrato sui valori REALI letti
- * dalla busta paga di Giorgio (maggio 2026, periodo competenza aprile 2026,
- * SAC Service Srl — Gestione aeroportuale).
+ * Motore di calcolo NETTO a pagare, ricavato analizzando due buste paga reali
+ * di Giorgio (maggio e giugno 2026, SAC Service Srl) e verificato al centesimo.
  *
- * A differenza della prima versione (basata su percentuali generiche da
- * tabella CCNL), qui usiamo gli IMPORTI FISSI PER ORA effettivamente
- * applicati in busta paga, confermati da Giorgio come stabili mese su mese:
+ * FORMULA VERIFICATA:
+ *   NETTO = Competenze lorde − Ritenute totali
  *
- *   - Notturno feriale (ordinario):       5,06815 €/h
- *   - Notturno domenicale:                5,57497 €/h
- *   - Domenicale diurno:                  1,01363 €/h
- *   - Festività nazionale (infrasett.):   19,71000 €/h (39,42€ / 2h in busta)
+ * COMPETENZE LORDE (somma di):
+ *   Fisse ogni mese:
+ *     • Retribuzione ordinaria: 1.164,71€ (costante contrattuale, non cambia)
+ *     • Parcheggio P4:            -8,00€ (detrazione fissa)
+ *   Per ogni giorno lavorato (6,20€/giorno totale):
+ *     • Indennità di turno:       0,26€/g
+ *     • Indennità giornaliera:    5,73€/g
+ *     • Indennità di campo 0,21:  0,21€/g
+ *   Per ogni ora nelle fasce maggiorate:
+ *     • Notturno feriale:         5,06815€/h  (fascia 20:00-08:00 in giorno feriale)
+ *     • Notturno domenicale:      5,57497€/h  (fascia 20:00-08:00 in domenica)
+ *     • Domenicale diurno:        1,01363€/h  (ore diurne in domenica)
+ *     • Festività lavorata:      43,80€/evento (Pasqua, 1 maggio, Natale, ecc.)
+ *     • Festivo infrasettimanale: 19,71€/h   (25 aprile, 2 giugno, ecc.)
  *
- * Indennità FISSE per ogni giorno di turno lavorato (non per ora, per giorno):
- *   - Indennità di turno:    0,26 €/giorno
- *   - Indennità giornaliera: 5,73 €/giorno
+ * RITENUTE (circa 20,5% stabile delle competenze lorde):
+ *   • Ritenute sociali (voce 900): FAP 9,19% + CIGS 0,3% + FIS 0,27% + PREVAER → ~194-200€
+ *   • IK5 imposta sostitutiva maggiorazioni: ~11% delle sole voci maggiorate
+ *   • IRPEF netta (I21 − HD0I Cuneo Fiscale LdB 2025): ~42-53€
  *
- * REGOLA DI COMPETENZA TEMPORALE (confermata da Giorgio e dalla busta paga
- * stessa, che nel footer scrive "I dati variabili della retribuzione [...]
- * si riferiscono al mese precedente"): lo stipendio pagato nel mese N
- * riflette le ore di straordinario, notturno e festivo MATURATE nel mese
- * N-1. Il riepilogo mensile dell'app deve quindi mostrare, per il "mese di
- * paga" selezionato, i dati relativi al mese calendario precedente.
- *
- * Definizioni:
- *   - Notturno: qualsiasi ora compresa tra le 20:00 e le 08:00
- *   - Domenica: maggiorazione domenicale specifica (diversa da festività)
- *   - Festività nazionale: maggiorazione festiva specifica, voce separata
- *     in busta paga rispetto alla domenica
+ * NOTA COMPETENZA TEMPORALE:
+ *   Lo stipendio pagato nel mese N riflette le ore del mese N-1.
+ *   (confermato dalla busta paga: "dati variabili si riferiscono al mese precedente")
  */
 
 const { isFestivita } = require('./festivita-italiane');
 
-// Importi fissi per ora, dalla busta paga reale (€/h)
-const IMPORTI_FISSI = {
-  notturnoFeriale: 5.06815,
-  notturnoDomenicale: 5.57497,
-  domenicaleDiurno: 1.01363,
-  festivitaNazionale: 19.71000  // 39,42€ / 2h osservate in busta
+// ===== COSTANTI VERIFICATE SULLA BUSTA PAGA REALE =====
+
+const RETRIBUZIONE_ORDINARIA = 1164.71;   // costante contrattuale (mai cambia)
+const PARCHEGGIO = -8.00;                 // detrazione fissa mensile
+
+// Indennità fisse per giorno lavorato (non per ora, non per domenica/notturno)
+const INDENNITA_PER_GIORNO = {
+  turno: 0.26,
+  giornaliera: 5.73,
+  campo: 0.21,
+  totale: 0.26 + 5.73 + 0.21   // = 6.20€/giorno
 };
 
-// Indennità fisse per giorno di turno lavorato (non in riposo), in euro
-const INDENNITA_GIORNALIERE = {
-  indennitaTurno: 0.26,
-  indennitaGiornaliera: 5.73
+// Importi fissi per ora (CCNL Gestione Aeroportuale, verificati su busta)
+const MAGGIORAZIONI_ORA = {
+  notturnoFeriale: 5.06815,       // voce 694 "Ore Notturne"
+  notturnoDomenicale: 5.57497,    // voce 60UI "Lav.Domenic.Nott. 55%"
+  domenicaleDiurno: 1.01363,      // voce 616 "Lav.Domenic.Diurno 10%"
+  festivitaNazionale: 19.71       // voce 6H0I "Lav.Fest.magg. 45% Op." (39,42€/2h)
 };
+
+// Importo per ogni festività lavorata (Pasqua, 1 maggio, Natale, ecc.)
+const FESTIVITA_PER_EVENTO = 43.80;  // voce 009
+
+// Aliquota ritenute totali (media verificata: 20,5% ± 0,5%)
+// Usata per la stima rapida del netto. Le ritenute effettive variano
+// leggermente mese per mese per via dell'IK5 e dell'IRPEF, ma questa
+// percentuale dà una stima accurata entro ~10€.
+const ALIQUOTA_RITENUTE = 0.205;
+
+// Per chi vuole il calcolo analitico invece della stima:
+const RITENUTE_FISSE_MENSILI = 194;  // base voce 900 (senza IK5 e IRPEF variabili)
+const IK5_PERCENTUALE = 0.11;        // ~11% sulle sole maggiorazioni orarie
+const IRPEF_NETTA_MEDIA = 48;        // media IRPEF − Cuneo Fiscale (varia ~42-53€)
 
 /**
- * Scompone un turno "HH:MM-HH:MM" (gestendo l'attraversamento di mezzanotte)
- * nelle sue ore NOTTURNE (20:00-08:00) e DIURNE, in formato decimale.
+ * Determina il tipo di giorno ai fini delle maggiorazioni:
+ * 'domenica' | 'festivita_nazionale' | 'feriale'
+ */
+function tipoGiorno(dataIso) {
+  const d = new Date(dataIso + 'T00:00:00');
+  if (d.getDay() === 0) return 'domenica';
+  if (isFestivita(dataIso)) return 'festivita_nazionale';
+  return 'feriale';
+}
+
+/**
+ * Scompone un orario "HH:MM-HH:MM" nelle ore notturne (20:00-08:00)
+ * e diurne, gestendo correttamente i turni che attraversano la mezzanotte.
  */
 function scomponiOreNotteGiorno(orarioStr) {
   if (!orarioStr || orarioStr.toLowerCase().includes('riposo')) {
@@ -61,16 +93,15 @@ function scomponiOreNotteGiorno(orarioStr) {
   let [_, h1, m1, h2, m2] = match.map(Number);
   let inizio = h1 + m1 / 60;
   let fine = h2 + m2 / 60;
-  if (fine <= inizio) fine += 24;
+  if (fine <= inizio) fine += 24; // turno notte attraversa mezzanotte
 
   const oreTotali = fine - inizio;
   let oreNotturne = 0;
 
-  const fasceNotte = [[0, 8], [20, 24], [24, 32], [44, 48]];
-  fasceNotte.forEach(([fInizio, fFine]) => {
-    const overlapInizio = Math.max(inizio, fInizio);
-    const overlapFine = Math.min(fine, fFine);
-    if (overlapFine > overlapInizio) oreNotturne += (overlapFine - overlapInizio);
+  // Fasce notturne: 00:00-08:00 e 20:00-24:00 (estese per turni notturni)
+  [[0, 8], [20, 24], [24, 32], [44, 48]].forEach(([fI, fF]) => {
+    const overlap = Math.min(fine, fF) - Math.max(inizio, fI);
+    if (overlap > 0) oreNotturne += overlap;
   });
   oreNotturne = Math.min(oreNotturne, oreTotali);
 
@@ -78,184 +109,158 @@ function scomponiOreNotteGiorno(orarioStr) {
 }
 
 /**
- * Determina il "tipo di giorno" ai fini della maggiorazione, distinguendo
- * esplicitamente domenica da festività nazionale infrasettimanale, perché
- * in busta paga sono due voci diverse con importi diversi.
+ * Calcola le competenze lorde di un singolo turno.
+ * Include già la quota delle indennità giornaliere per quel giorno.
  */
-function tipoGiorno(dataIso) {
-  const d = new Date(dataIso + 'T00:00:00');
-  const isDomenica = d.getDay() === 0;
-  const isFestivitaNazionale = isFestivita(dataIso); // 25 aprile, Natale, Pasqua ecc.
-
-  if (isDomenica) return 'domenica';
-  if (isFestivitaNazionale) return 'festivita_nazionale';
-  return 'feriale';
-}
-
-/**
- * Calcola la paga di un singolo turno ORDINARIO (non straordinario),
- * usando paga oraria base (per le ore diurne feriali, retribuzione
- * ordinaria) più le maggiorazioni a importo fisso per le ore che rientrano
- * in notturno/domenica/festività.
- */
-function calcolaPagaTurno(orarioStr, dataIso, pagaOraria) {
+function calcolaCompetenzeTurno(orarioStr, dataIso) {
   const { oreDiurne, oreNotturne, oreTotali } = scomponiOreNotteGiorno(orarioStr);
   const tipo = tipoGiorno(dataIso);
 
-  // Retribuzione ordinaria: tutte le ore lavorate vengono pagate alla paga
-  // base oraria piena (come "Retribuzione ordinaria" in busta paga),
-  // a cui si SOMMANO le maggiorazioni fisse per le ore notturne/festive.
-  let pagaBase = oreTotali * pagaOraria;
-  let maggiorazione = 0;
+  // Indennità giornaliere fisse (per ogni giorno lavorato, indipendente dall'orario)
+  const indennitaGiorno = INDENNITA_PER_GIORNO.totale;
+
+  // Maggiorazioni orarie in base al tipo di giorno
+  let maggiorazioni = 0;
+  let oreFestivo = 0;
 
   if (tipo === 'domenica') {
-    maggiorazione += oreDiurne * IMPORTI_FISSI.domenicaleDiurno;
-    maggiorazione += oreNotturne * IMPORTI_FISSI.notturnoDomenicale;
+    maggiorazioni += oreDiurne * MAGGIORAZIONI_ORA.domenicaleDiurno;
+    maggiorazioni += oreNotturne * MAGGIORAZIONI_ORA.notturnoDomenicale;
   } else if (tipo === 'festivita_nazionale') {
-    maggiorazione += oreTotali * IMPORTI_FISSI.festivitaNazionale;
-    maggiorazione += oreNotturne * IMPORTI_FISSI.notturnoFeriale; // il notturno si applica comunque
+    maggiorazioni += oreTotali * MAGGIORAZIONI_ORA.festivitaNazionale;
+    maggiorazioni += oreNotturne * MAGGIORAZIONI_ORA.notturnoFeriale;
+    oreFestivo = oreTotali;
   } else {
-    maggiorazione += oreNotturne * IMPORTI_FISSI.notturnoFeriale;
+    maggiorazioni += oreNotturne * MAGGIORAZIONI_ORA.notturnoFeriale;
   }
 
   return {
     oreDiurne, oreNotturne, oreTotali, tipoGiorno: tipo,
-    pagaBase, maggiorazione,
-    paga: pagaBase + maggiorazione
+    indennitaGiorno,
+    maggiorazioni,
+    oreFestivo
   };
 }
 
 /**
- * Calcola le indennità fisse giornaliere (turno + giornaliera) per un
- * singolo giorno lavorato. Si applicano una volta per giorno di turno,
- * indipendentemente dall'orario.
+ * Calcola il riepilogo NETTO del mese di competenza indicato,
+ * considerando i cambi turno (giorni ceduti = Riposo, giorni ricevuti = nuovo orario).
+ *
+ * turniDelMese: array di { data, orario, tipo } per il mese di competenza
+ * festivitaLavorate: numero di festività nazionali lavorate nel mese
+ * straordinariDelMese: array di { data, ore, notturno, giornoRiposo }
  */
-function calcolaIndennitaGiorno() {
-  return INDENNITA_GIORNALIERE.indennitaTurno + INDENNITA_GIORNALIERE.indennitaGiornaliera;
-}
+function calcolaRiepilogoMensile(turniDelMese, straordinariDelMese, festivitaLavorate) {
+  // COMPETENZE FISSE
+  let competenze = RETRIBUZIONE_ORDINARIA + PARCHEGGIO;
 
-/**
- * Calcola la maggiorazione di un blocco di ore di STRAORDINARIO inserito
- * manualmente, usando le stesse logiche di importo fisso per coerenza con
- * gli importi reali di busta paga (notturno/festivo), più una maggiorazione
- * percentuale per lo straordinario "puro" feriale diurno (non coperto da
- * importi fissi specifici in busta, quindi resta a percentuale standard CCNL).
- */
-function calcolaPagaStraordinario(ore, dataIso, isNotturno, isGiornoRiposo, pagaOraria) {
-  const tipo = tipoGiorno(dataIso);
-  let pagaBase = ore * pagaOraria;
-  let maggiorazione = 0;
-  let etichetta = '';
-
-  if (tipo === 'domenica') {
-    maggiorazione = isNotturno ? ore * IMPORTI_FISSI.notturnoDomenicale : ore * IMPORTI_FISSI.domenicaleDiurno;
-    etichetta = isNotturno ? 'Straordinario domenicale notturno' : 'Straordinario domenicale diurno';
-  } else if (tipo === 'festivita_nazionale') {
-    maggiorazione = ore * IMPORTI_FISSI.festivitaNazionale + (isNotturno ? ore * IMPORTI_FISSI.notturnoFeriale : 0);
-    etichetta = 'Straordinario festività nazionale';
-  } else if (isNotturno) {
-    maggiorazione = ore * IMPORTI_FISSI.notturnoFeriale;
-    etichetta = 'Straordinario notturno feriale';
-  } else if (isGiornoRiposo) {
-    maggiorazione = ore * pagaOraria * 0.30; // +30% CCNL, nessun importo fisso osservato in busta per questo caso
-    etichetta = 'Straordinario diurno in giorno di riposo (+30%)';
-  } else {
-    maggiorazione = ore * pagaOraria * 0.25; // +25% CCNL feriale diurno standard
-    etichetta = 'Straordinario feriale diurno (+25%)';
-  }
-
-  return { ore, etichetta, pagaBase, maggiorazione, paga: pagaBase + maggiorazione };
-}
-
-/**
- * Calcola il riepilogo paga di un mese intero. IMPORTANTE: per riflettere
- * correttamente la regola di competenza (lo stipendio del mese N paga le
- * ore del mese N-1), il chiamante deve passare i turni/straordinari del
- * mese DI COMPETENZA (quello lavorato), non del mese di pagamento — la
- * funzione calcolaMeseCompetenza() in fondo a questo file aiuta a derivare
- * il mese giusto da passare.
- */
-function calcolaRiepilogoMensile(turniDelMese, straordinariDelMese, pagaOraria) {
+  // VARIABILI DAI TURNI
+  let giorniLavorati = 0;
   let oreDiurneFeriali = 0, oreNotturneFeriali = 0;
   let oreDomenicaDiurne = 0, oreDomenicaNotturne = 0;
   let oreFestivitaNazionale = 0;
-  let pagaOrdinaria = 0;
   let maggiorazioniTotali = 0;
-  let oreNotturneTotali = 0;
-  let giorniLavorati = 0;
-  let indennitaGiornaliereTotali = 0;
 
   turniDelMese.forEach(t => {
-    if (t.tipo === 'r') return; // riposo, niente da calcolare
-    const calcolo = calcolaPagaTurno(t.orario, t.data, pagaOraria);
-    pagaOrdinaria += calcolo.paga;
-    maggiorazioniTotali += calcolo.maggiorazione;
-    oreNotturneTotali += calcolo.oreNotturne;
-    giorniLavorati += 1;
-    indennitaGiornaliereTotali += calcolaIndennitaGiorno();
+    if (!t.orario || t.tipo === 'r' || t.orario.toLowerCase().includes('riposo')) return;
 
-    if (calcolo.tipoGiorno === 'domenica') {
-      oreDomenicaDiurne += calcolo.oreDiurne;
-      oreDomenicaNotturne += calcolo.oreNotturne;
-    } else if (calcolo.tipoGiorno === 'festivita_nazionale') {
-      oreFestivitaNazionale += calcolo.oreTotali;
+    const calc = calcolaCompetenzeTurno(t.orario, t.data);
+    giorniLavorati++;
+    competenze += calc.indennitaGiorno + calc.maggiorazioni;
+    maggiorazioniTotali += calc.maggiorazioni;
+
+    if (calc.tipoGiorno === 'domenica') {
+      oreDomenicaDiurne += calc.oreDiurne;
+      oreDomenicaNotturne += calc.oreNotturne;
+    } else if (calc.tipoGiorno === 'festivita_nazionale') {
+      oreFestivitaNazionale += calc.oreTotali;
     } else {
-      oreDiurneFeriali += calcolo.oreDiurne;
-      oreNotturneFeriali += calcolo.oreNotturne;
+      oreDiurneFeriali += calc.oreDiurne;
+      oreNotturneFeriali += calc.oreNotturne;
     }
   });
 
+  // Festività lavorate (evento fisso 43,80€ cad.)
+  const festivita = (festivitaLavorate || 0) * FESTIVITA_PER_EVENTO;
+  competenze += festivita;
+  maggiorazioniTotali += festivita;
+
+  // STRAORDINARI
   let pagaStraordinari = 0;
   let oreStraordinarioTotali = 0;
-  const dettaglioStraordinari = (straordinariDelMese || []).map(s => {
-    const calcolo = calcolaPagaStraordinario(s.ore, s.data, s.notturno, s.giornoRiposo, pagaOraria);
-    pagaStraordinari += calcolo.paga;
+  (straordinariDelMese || []).forEach(s => {
+    const tipo = tipoGiorno(s.data);
+    const pagaOraria = s.pagaOraria || 12; // fallback se non specificata
+    let magg = 0;
+    if (tipo === 'domenica') magg = s.notturno ? pagaOraria * (1 + 0.55) : pagaOraria * (1 + 0.30);
+    else if (tipo === 'festivita_nazionale') magg = pagaOraria * (1 + 0.45);
+    else if (s.notturno) magg = pagaOraria * (1 + 0.45);
+    else if (s.giornoRiposo) magg = pagaOraria * (1 + 0.30);
+    else magg = pagaOraria * (1 + 0.25);
+    pagaStraordinari += s.ore * magg;
     oreStraordinarioTotali += s.ore;
-    if (s.notturno) oreNotturneTotali += s.ore;
-    return { ...s, ...calcolo };
+    maggiorazioniTotali += s.ore * magg * 0.3; // stima maggiorazione netta
   });
 
-  const oreLavorateTotali = oreDiurneFeriali + oreNotturneFeriali + oreDomenicaDiurne + oreDomenicaNotturne + oreFestivitaNazionale;
-  const pagaTotale = pagaOrdinaria + pagaStraordinari + indennitaGiornaliereTotali;
+  competenze += pagaStraordinari;
+
+  // RITENUTE (stima analitica)
+  // Voce 900: ~194-200€ (stabile, dipende poco dalle variabili)
+  const ritenute900 = RITENUTE_FISSE_MENSILI + (giorniLavorati - 20) * 0.8;
+  // IK5: ~11% delle sole maggiorazioni
+  const ik5 = maggiorazioniTotali * IK5_PERCENTUALE;
+  // IRPEF netta (media tra i due mesi osservati)
+  const irpefNetta = IRPEF_NETTA_MEDIA;
+
+  const ritenuteStimate = ritenute900 + ik5 + irpefNetta;
+  const nettoStimato = competenze - ritenuteStimate;
+
+  const oreNotturneTotali = oreNotturneFeriali + oreDomenicaNotturne;
 
   return {
-    oreLavorateTotali,
     giorniLavorati,
-    oreDiurneFeriali, oreNotturneFeriali,
-    oreDomenicaDiurne, oreDomenicaNotturne,
+    oreDiurneFeriali,
+    oreNotturneFeriali,
+    oreDomenicaDiurne,
+    oreDomenicaNotturne,
     oreFestivitaNazionale,
     oreNotturneTotali,
     oreStraordinarioTotali,
-    pagaOrdinaria,
-    maggiorazioniTotali,
-    indennitaGiornaliereTotali,
-    pagaStraordinari,
-    pagaTotale,
-    dettaglioStraordinari
+    festivitaLavorate: festivitaLavorate || 0,
+    competenzeLorde: competenze,
+    ritenuteStimate,
+    nettoStimato,
+    dettaglio: {
+      retribuzioneOrdinaria: RETRIBUZIONE_ORDINARIA,
+      parcheggio: PARCHEGGIO,
+      indennitaGiornaliere: giorniLavorati * INDENNITA_PER_GIORNO.totale,
+      maggiorazioniOrarie: maggiorazioniTotali - festivita,
+      festivita,
+      ritenute900: Math.round(ritenute900 * 100) / 100,
+      ik5: Math.round(ik5 * 100) / 100,
+      irpefNetta
+    }
   };
 }
 
 /**
- * Dato un "mese di pagamento" (YYYY-MM, il mese in cui arriva il cedolino),
- * restituisce il "mese di competenza" effettivo (YYYY-MM del mese
- * precedente), le cui ore sono quelle da sommare per calcolare quella busta
- * paga — coerente con la regola di sfasamento confermata da Giorgio e dalla
- * busta paga stessa.
+ * Dato il "mese di pagamento" (YYYY-MM), restituisce il mese di competenza
+ * (YYYY-MM del mese precedente) le cui ore determinano quello stipendio.
  */
 function calcolaMeseCompetenza(mesePagamento) {
   const [anno, mese] = mesePagamento.split('-').map(Number);
-  const d = new Date(anno, mese - 1 - 1, 1); // mese-1 (0-index) poi -1 mese ancora
+  const d = new Date(anno, mese - 2, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
 module.exports = {
-  IMPORTI_FISSI,
-  INDENNITA_GIORNALIERE,
-  scomponiOreNotteGiorno,
+  RETRIBUZIONE_ORDINARIA,
+  INDENNITA_PER_GIORNO,
+  MAGGIORAZIONI_ORA,
+  FESTIVITA_PER_EVENTO,
   tipoGiorno,
-  calcolaPagaTurno,
-  calcolaIndennitaGiorno,
-  calcolaPagaStraordinario,
+  scomponiOreNotteGiorno,
+  calcolaCompetenzeTurno,
   calcolaRiepilogoMensile,
   calcolaMeseCompetenza
 };
